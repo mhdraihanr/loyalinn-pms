@@ -1,6 +1,6 @@
 export type Role = "owner" | "admin" | "agent";
 
-export const ROLE_PERMISSIONS = {
+export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   owner: ["*"], // Full access
   admin: [
     "guests:read",
@@ -21,7 +21,7 @@ export const ROLE_PERMISSIONS = {
     "messages:send",
     "templates:read",
   ],
-} as const;
+};
 
 export function hasPermission(role: Role, permission: string): boolean {
   const permissions = ROLE_PERMISSIONS[role];
