@@ -6,7 +6,7 @@ Build a Next.js web app that integrates with hotel PMS systems to sync reservati
 
 ## Principles
 
-- Multi-tenant isolation first (database + application layer)
+- Single tenant per user (1:1 relationship)
 - Security and reliability before feature breadth
 - Start with one PMS adapter for MVP, then scale adapters
 - Event-driven automation with idempotency and observability
@@ -44,7 +44,7 @@ Acceptance Criteria:
 - App starts locally with clear env validation errors
 - Missing env variables fail fast at startup (non-silent)
 
-### Task 0.2: Multi-tenant schema + RLS baseline
+### Task 0.2: Single tenant per user schema + RLS baseline
 
 Files:
 
@@ -53,8 +53,7 @@ Files:
 
 Tables:
 
-- tenants
-- tenant_users (membership + role)
+- tenants (with user_id for 1:1 relationship)
 - pms_configurations
 - waha_configurations
 - guests
@@ -67,33 +66,35 @@ Tables:
 RLS Requirements:
 
 - All tenant-scoped tables require tenant_id policy
-- tenant_users role drives authorization scope
+- Direct user_id lookup from tenants table
 - Service role only for server-side privileged operations
 
 Acceptance Criteria:
 
-- Cross-tenant reads/writes are blocked by policy
-- Tenant member can only access own tenant records
+- Cross-user reads/writes are blocked by policy
+- User can only access their own tenant records
 
-### Task 0.3: Auth, middleware, tenant context, RBAC
+### Task 0.3: Auth, middleware, tenant context
 
 Files:
 
 - Create: a-proposal2/lib/supabase/client.ts
 - Create: a-proposal2/lib/supabase/server.ts
 - Create: a-proposal2/middleware.ts
-- Create: a-proposal2/lib/auth/rbac.ts
+- Create: a-proposal2/lib/auth/tenant.ts
+- Create: a-proposal2/lib/auth/onboarding.ts
 
 Rules:
 
 - Use cookie-based SSR client approach
-- Middleware refreshes auth session and resolves tenant
-- RBAC roles: owner, admin, agent
+- Middleware refreshes auth session
+- Auto-create tenant on user signup
+- No RBAC needed (single tenant per user)
 
 Acceptance Criteria:
 
 - Protected routes redirect unauthenticated users
-- RBAC checks enforced in APIs and server actions
+- Tenant auto-created when user signs up
 
 ### Task 0.4: Migration strategy and DB versioning
 

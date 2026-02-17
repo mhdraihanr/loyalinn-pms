@@ -1,38 +1,38 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "../supabase/server";
 
-export type TenantUser = {
+export type UserTenant = {
   tenantId: string;
   userId: string;
-  role: "owner" | "admin" | "agent";
 };
 
-export async function getCurrentTenantUser(): Promise<TenantUser | null> {
+export async function getCurrentUserTenant(): Promise<UserTenant | null> {
   const supabase = await createClient();
-
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
   if (!user) return null;
 
-  const { data: tenantUser } = await supabase
-    .from("tenant_users")
-    .select("tenant_id, user_id, role")
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("id")
     .eq("user_id", user.id)
     .single();
 
-  if (!tenantUser) return null;
+  if (!tenant) return null;
 
   return {
-    tenantId: tenantUser.tenant_id,
-    userId: tenantUser.user_id,
-    role: tenantUser.role,
+    tenantId: tenant.id,
+    userId: user.id,
   };
 }
 
-export async function requireTenantUser(): Promise<TenantUser> {
-  const tenantUser = await getCurrentTenantUser();
-  if (!tenantUser) {
-    throw new Error("User is not associated with any tenant");
+export async function requireUserTenant(): Promise<UserTenant> {
+  const userTenant = await getCurrentUserTenant();
+
+  if (!userTenant) {
+    throw new Error("User must have a tenant. Please complete onboarding.");
   }
-  return tenantUser;
+
+  return userTenant;
 }

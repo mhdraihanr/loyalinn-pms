@@ -1,25 +1,17 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Tenants table
+-- Tenants table (1:1 with users)
 CREATE TABLE tenants (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID UNIQUE NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   slug TEXT UNIQUE NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Tenant users table (membership + role)
-CREATE TABLE tenant_users (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'agent')),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(tenant_id, user_id)
-);
+-- Note: tenant_users table removed - single tenant per user model
 
 -- PMS configurations table
 CREATE TABLE pms_configurations (
@@ -142,7 +134,6 @@ CREATE TABLE automation_jobs (
 
 -- Enable RLS on all tables
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tenant_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pms_configurations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE waha_configurations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guests ENABLE ROW LEVEL SECURITY;
@@ -152,67 +143,55 @@ ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbound_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE automation_jobs ENABLE ROW LEVEL SECURITY;
 
--- Tenant users can only see their own tenant
-CREATE POLICY "Users can view their tenant" ON tenants
-  FOR SELECT USING (
-    id IN (
-      SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid()
-    )
-  );
-
--- Tenant users policies
-CREATE POLICY "Users can view their tenant memberships" ON tenant_users
-  FOR SELECT USING (
-    tenant_id IN (
-      SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid()
-    )
-  );
+-- Users can only see and manage their own tenant
+CREATE POLICY "Users can manage their tenant" ON tenants
+  FOR ALL USING (user_id = auth.uid());
 
 -- PMS configurations policies
-CREATE POLICY "Users can view their tenant PMS config" ON pms_configurations
+CREATE POLICY "Users can manage their PMS config" ON pms_configurations
   FOR ALL USING (
     tenant_id IN (
-      SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid()
+      SELECT id FROM tenants WHERE user_id = auth.uid()
     )
   );
 
 -- WAHA configurations policies
-CREATE POLICY "Users can manage their tenant WAHA config" ON waha_configurations
+CREATE POLICY "Users can manage their WAHA config" ON waha_configurations
   FOR ALL USING (
     tenant_id IN (
-      SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid()
+      SELECT id FROM tenants WHERE user_id = auth.uid()
     )
   );
 
 -- Guests policies
-CREATE POLICY "Users can manage their tenant guests" ON guests
+CREATE POLICY "Users can manage their guests" ON guests
   FOR ALL USING (
     tenant_id IN (
-      SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid()
+      SELECT id FROM tenants WHERE user_id = auth.uid()
     )
   );
 
 -- Reservations policies
-CREATE POLICY "Users can manage their tenant reservations" ON reservations
+CREATE POLICY "Users can manage their reservations" ON reservations
   FOR ALL USING (
     tenant_id IN (
-      SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid()
+      SELECT id FROM tenants WHERE user_id = auth.uid()
     )
   );
 
 -- Message templates policies
-CREATE POLICY "Users can manage their tenant templates" ON message_templates
+CREATE POLICY "Users can manage their templates" ON message_templates
   FOR ALL USING (
     tenant_id IN (
-      SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid()
+      SELECT id FROM tenants WHERE user_id = auth.uid()
     )
   );
 
 -- Message logs policies
-CREATE POLICY "Users can view their tenant message logs" ON message_logs
+CREATE POLICY "Users can view their message logs" ON message_logs
   FOR SELECT USING (
     tenant_id IN (
-      SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid()
+      SELECT id FROM tenants WHERE user_id = auth.uid()
     )
   );
 
@@ -225,8 +204,7 @@ CREATE POLICY "Service role can manage automation jobs" ON automation_jobs
   FOR ALL USING (true);
 
 -- Indexes for performance
-CREATE INDEX idx_tenant_users_tenant_id ON tenant_users(tenant_id);
-CREATE INDEX idx_tenant_users_user_id ON tenant_users(user_id);
+CREATE INDEX idx_tenants_user_id ON tenants(user_id);
 CREATE INDEX idx_guests_tenant_id ON guests(tenant_id);
 CREATE INDEX idx_reservations_tenant_id ON reservations(tenant_id);
 CREATE INDEX idx_reservations_status ON reservations(status);
