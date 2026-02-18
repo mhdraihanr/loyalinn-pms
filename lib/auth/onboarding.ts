@@ -1,45 +1,62 @@
 import { createClient } from "../supabase/server";
 
 /**
- * Auto-create tenant for new user during onboarding
+ * Register a new owner and create their tenant.
+ * Only callable if user does NOT already belong to any tenant.
  */
-export async function createTenantForUser(
+export async function createTenantAsOwner(
   userId: string,
   hotelName: string,
 ): Promise<string> {
   const supabase = await createClient();
 
-  // Generate slug from hotel name
+  // Guard: prevent user from creating a second tenant
+  const { data: existing } = await supabase
+    .from("tenant_users")
+    .select("id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existing) {
+    throw new Error("User already belongs to a tenant.");
+  }
+
+  // Generate URL-safe slug from hotel name
   const slug = hotelName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
-  const { data: tenant, error } = await supabase
+  // Create the tenant
+  const { data: tenant, error: tenantError } = await supabase
     .from("tenants")
-    .insert({
-      user_id: userId,
-      name: hotelName,
-      slug: slug,
-    })
+    .insert({ name: hotelName, slug })
     .select("id")
     .single();
 
-  if (error) throw error;
+  if (tenantError) throw tenantError;
+
+  // Assign user as owner
+  const { error: memberError } = await supabase.from("tenant_users").insert({
+    tenant_id: tenant.id,
+    user_id: userId,
+    role: "owner",
+  });
+
+  if (memberError) throw memberError;
+
   return tenant.id;
 }
 
 /**
- * Check if user already has a tenant
+ * Check if a user already belongs to any tenant.
  */
 export async function userHasTenant(userId: string): Promise<boolean> {
   const supabase = await createClient();
-
   const { data } = await supabase
-    .from("tenants")
+    .from("tenant_users")
     .select("id")
     .eq("user_id", userId)
-    .single();
-
+    .maybeSingle();
   return !!data;
 }

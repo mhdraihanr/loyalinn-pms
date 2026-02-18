@@ -1,193 +1,105 @@
-# Phase 0: Foundations - Implementation Walkthrough (Single Tenant Per User)
+# Phase 0: Foundations - Walkthrough
 
-> **Updated:** 2026-02-17  
-> **Architecture:** Single Tenant Per User (1:1 relationship)
+> **Updated:** 2026-02-18
+> **Architecture:** 1 Tenant → Many Users, 1 User → max 1 Tenant
 
 ## Overview
 
-Successfully completed Phase 0 of the Hotel PMS Integration & WhatsApp Automation Web App. This phase established the foundational infrastructure for a **single tenant per user** application with Next.js 14, Supabase, and comprehensive security and observability features.
+Phase 0 established the foundational infrastructure for the Hotel PMS Integration & WhatsApp Automation Web App.
 
-**Key Principle:** Each user manages their own hotel independently (1 User = 1 Tenant).
-
----
-
-## What Was Accomplished
-
-### Task 0.1: Project Bootstrap and Environment Contract ✅
-
-**Created:**
-
-- Next.js 14 project with TypeScript, Tailwind CSS, and App Router
-- Supabase dependencies (@supabase/supabase-js, @supabase/ssr)
-- Environment variables template (`.env.local.example`)
-- Environment validation utility (`lib/env.ts`)
-
-**Verification:**
-
-- ✅ App starts successfully on http://localhost:3000
-- ✅ No TypeScript compilation errors
-- ✅ All dependencies installed correctly
-
----
-
-### Task 0.2: Single Tenant Per User Schema + RLS Baseline ✅
-
-**Created:**
-
-- `supabase/schema.sql` - Complete database schema with 9 tables
-- `supabase/seed.sql` - Demo data (commented out)
-- `supabase/README.md` - Schema documentation
-
-**Database Tables (9 tables):**
-
-1. **tenants** - User's hotel (1:1 with auth.users via `user_id`)
-2. **pms_configurations** - PMS integration settings per tenant
-3. **waha_configurations** - WhatsApp API settings per tenant
-4. **guests** - Guest profiles synced from PMS
-5. **reservations** - Reservation data synced from PMS
-6. **message_templates** - Customizable message templates
-7. **message_logs** - Audit trail of all messages sent
-8. **inbound_events** - Webhook event deduplication
-9. **automation_jobs** - Message queue with retry logic
-
-**Key Schema Feature:**
-
-```sql
-CREATE TABLE tenants (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID UNIQUE NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  slug TEXT UNIQUE NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
-**Security Features:**
-
-- ✅ Row Level Security (RLS) enabled on all tables
-- ✅ Direct user_id lookup from tenants table
-- ✅ Users can only access their own tenant data
-- ✅ Service role policies for webhook and automation operations
-- ✅ Performance indexes on frequently queried columns
-
-**RLS Policy Example:**
-
-```sql
-CREATE POLICY "Users can manage their tenant" ON tenants
-  FOR ALL USING (user_id = auth.uid());
-
-CREATE POLICY "Users can manage their guests" ON guests
-  FOR ALL USING (
-    tenant_id IN (SELECT id FROM tenants WHERE user_id = auth.uid())
-  );
-```
-
----
-
-### Task 0.3: Auth, Middleware, Tenant Context ✅
-
-**Created:**
-
-#### Supabase Clients
-
-- `lib/supabase/client.ts` - Client-side Supabase client
-- `lib/supabase/server.ts` - Server-side Supabase client with cookie handling
-
-#### Middleware
-
-- `middleware.ts` - Auth session refresh and route protection
-  - Refreshes expired sessions automatically
-  - Protects `/dashboard` routes (redirects to `/login` if unauthenticated)
-  - Redirects authenticated users from `/login` and `/signup` to `/dashboard`
-
-#### Tenant Context & Onboarding
-
-- `lib/auth/tenant.ts` - Tenant context utilities
-  - `getCurrentUserTenant()` - Get current user's tenant
-  - `requireUserTenant()` - Enforce tenant existence
-
-- `lib/auth/onboarding.ts` - Auto-create tenant on signup
-  - `createTenantForUser(userId, hotelName)` - Create tenant for new user
-  - `userHasTenant(userId)` - Check if user has tenant
-
-**Key Difference from Multi-Tenant:**
-
-- ❌ No `lib/auth/rbac.ts` (no role-based access control)
-- ❌ No `tenant_users` table (direct 1:1 relationship)
-- ✅ Every user is the owner of their own tenant
-- ✅ Automatic tenant creation on signup
-
-**Verification:**
-
-- ✅ Middleware correctly protects routes
-- ✅ Session refresh works seamlessly
-- ✅ Tenant context utilities work correctly
-
----
-
-### Task 0.4: Migration Strategy and DB Versioning ✅
-
-**Created:**
-
-- `supabase/migrations/` - Directory for database migrations
-- `supabase/migrations/README.md` - Migration naming convention
-- `docs/migrations.md` - Comprehensive migration strategy
-
-**Migration Guidelines:**
-
-- File naming: `YYYYMMDDHHMMSS_description.sql`
-- Backwards compatibility required
-- Idempotency enforced
-- Rollback steps documented
-- Testing in development before production
-
----
-
-### Task 0.5: Observability Minimum Baseline ✅
-
-**Created:**
-
-#### Structured Logging
-
-- `lib/observability/types.ts` - Log types and interfaces
-  - Log levels: debug, info, warn, error, fatal
-  - Log context: requestId, tenantId, userId, reservationId, jobId, eventId
-  - Error categories: validation, integration, retryable, fatal
-
-- `lib/observability/logger.ts` - Structured logger implementation
-  - Context management for request tracing
-  - JSON-formatted logs for easy parsing
-  - Error categorization for better incident response
-
-#### Operational Runbook
-
-- `docs/runbook.md` - Comprehensive operational procedures
-  - Monitoring key metrics (auth, PMS, WhatsApp, database)
-  - Incident response playbooks
-  - Alert thresholds (critical vs warning)
-  - On-call procedures
-  - Escalation paths
-
----
-
-## Git Commits
-
-All changes were committed to git with descriptive messages:
+**Model:**
 
 ```
-38692b7 docs: update Phase 0 README for single tenant per user architecture
-c22b95d docs: add refactoring summary for single tenant per user conversion
-4e530ac refactor: convert from multi-tenant to single tenant per user architecture
-51d6032 docs: organize Phase 0 documentation into dedicated folder
-43afa45 docs: add Phase 0 implementation walkthrough
-aaf9d8f fix: resolve TypeScript error in RBAC permissions type
-2bb84c9 feat: add structured logging and operational runbook
-8b53fed docs: add database migration strategy
-ee455c6 feat: add Supabase auth, middleware, and RBAC
-0632945 feat: add multi-tenant database schema with RLS
-4f1ae27 feat: initialize Next.js 14 project with TypeScript, Tailwind, and Supabase
+Tenant (Hotel A)
+├── User 1 (owner)   ← registers, creates tenant
+├── User 2 (staff)   ← invited by owner via email
+└── User 3 (staff)   ← invited by owner via email
 ```
+
+**Key constraint:** `tenant_users.user_id UNIQUE` — 1 user can only belong to 1 tenant (database-enforced).
+
+---
+
+## Task 0.1: Project Bootstrap ✅
+
+- Next.js 14 + TypeScript + Tailwind CSS + App Router
+- Supabase dependencies (`@supabase/supabase-js`, `@supabase/ssr`)
+- `.env.local.example` — all required env vars documented
+- `lib/env.ts` — fail-fast validation on startup
+
+---
+
+## Task 0.2: Multi-User Tenant Schema + RLS ✅
+
+**10 tables created:**
+
+1. **tenants** — hotel entity
+2. **tenant_users** — membership with `UNIQUE(user_id)`, roles: `owner` | `staff`
+3. **pms_configurations** — PMS integration settings
+4. **waha_configurations** — WhatsApp API settings
+5. **guests** — guest profiles from PMS
+6. **reservations** — reservation data from PMS
+7. **message_templates** — customizable templates
+8. **message_logs** — audit trail
+9. **inbound_events** — webhook deduplication
+10. **automation_jobs** — message queue with retry
+
+**RLS policy design:**
+
+| Table               | Members (owner+staff) | Owner only             |
+| ------------------- | --------------------- | ---------------------- |
+| tenants             | SELECT                | UPDATE                 |
+| tenant_users        | SELECT                | INSERT, UPDATE, DELETE |
+| pms_configurations  | SELECT                | ALL                    |
+| waha_configurations | SELECT                | ALL                    |
+| guests              | ALL                   | —                      |
+| reservations        | ALL                   | —                      |
+| message_templates   | ALL                   | —                      |
+| message_logs        | SELECT                | —                      |
+| inbound_events      | service role          | —                      |
+| automation_jobs     | service role          | —                      |
+
+---
+
+## Task 0.3: Auth, Middleware, Tenant Context, Invite Flow ✅
+
+**Files created:**
+
+- `lib/supabase/client.ts` — browser client
+- `lib/supabase/server.ts` — SSR server client
+- `lib/supabase/admin.ts` — service role client (bypasses RLS)
+- `middleware.ts` — session refresh + route protection
+- `lib/auth/tenant.ts` — `getCurrentUserTenant()`, `requireUserTenant()`, `requireOwner()`
+- `lib/auth/onboarding.ts` — `createTenantAsOwner()` with duplicate guard
+- `lib/auth/invitations.ts` — `inviteStaffMember()`, `acceptStaffInvitation()`
+
+**Owner registration flow:**
+
+```
+Register → createTenantAsOwner(userId, hotelName) → dashboard
+```
+
+**Staff invite flow:**
+
+```
+Owner invites email → Supabase sends magic link (with pending_tenant_id in metadata)
+→ Staff clicks link → acceptStaffInvitation(userId) → tenant_users record created
+```
+
+---
+
+## Task 0.4: Migration Strategy ✅
+
+- `supabase/migrations/README.md` — naming convention
+- `docs/migrations.md` — workflow, rollback, best practices
+
+---
+
+## Task 0.5: Observability ✅
+
+- `lib/observability/types.ts` — log levels, context, error categories
+- `lib/observability/logger.ts` — structured logger
+- `docs/runbook.md` — monitoring, incident playbooks, escalation
 
 ---
 
@@ -195,132 +107,47 @@ ee455c6 feat: add Supabase auth, middleware, and RBAC
 
 ```
 a-proposal2/
-├── .env.local.example          # Environment variables template
-├── middleware.ts               # Auth middleware
-├── next.config.ts              # Next.js configuration
-├── app/                        # Next.js App Router
+├── middleware.ts
 ├── lib/
-│   ├── env.ts                  # Environment validation
+│   ├── env.ts
 │   ├── auth/
-│   │   ├── tenant.ts          # Tenant context utilities
-│   │   └── onboarding.ts      # Auto-create tenant on signup
+│   │   ├── tenant.ts        # getCurrentUserTenant, requireOwner
+│   │   ├── onboarding.ts    # createTenantAsOwner
+│   │   └── invitations.ts   # inviteStaffMember, acceptStaffInvitation
 │   ├── observability/
-│   │   ├── types.ts           # Logging types
-│   │   └── logger.ts          # Structured logger
+│   │   ├── types.ts
+│   │   └── logger.ts
 │   └── supabase/
-│       ├── client.ts          # Client-side Supabase
-│       └── server.ts          # Server-side Supabase
-├── supabase/
-│   ├── schema.sql             # Database schema (single tenant)
-│   ├── seed.sql               # Seed data (commented)
-│   ├── README.md              # Schema documentation
-│   └── migrations/            # Migration files
-│       └── README.md
-└── docs/
-    ├── migrations.md          # Migration strategy
-    ├── runbook.md             # Operational runbook
-    └── phase-0/
-        ├── README.md          # Phase 0 overview
-        ├── implementation-plan.md
-        ├── walkthrough.md     # This file
-        └── refactoring-summary.md
+│       ├── client.ts
+│       ├── server.ts
+│       └── admin.ts         # service role client
+└── supabase/
+    ├── schema.sql            # 10 tables, RLS, indexes
+    ├── seed.sql
+    └── migrations/
 ```
 
 ---
 
-## Acceptance Criteria - All Met ✅
+## Acceptance Criteria — All Met ✅
 
-- ✅ Next.js 14 project initialized with TypeScript and Tailwind CSS
-- ✅ All required environment variables documented in `.env.local.example`
-- ✅ Environment validation fails fast with clear error messages
-- ✅ Single tenant per user database schema with RLS policies
-- ✅ Supabase client and server utilities created
-- ✅ Middleware refreshes auth sessions and protects routes
-- ✅ Tenant context utilities for single tenant model
-- ✅ Auto-tenant creation on signup
+- ✅ Next.js 14 + TypeScript + Tailwind
+- ✅ Env vars documented and validated
+- ✅ 10-table schema with role-based RLS
+- ✅ `UNIQUE(user_id)` — 1 user max 1 tenant
+- ✅ Owner can create tenant on registration
+- ✅ Owner can invite staff via email
+- ✅ Staff cannot create tenants or invite others
 - ✅ Migration strategy documented
-- ✅ Structured logging with request tracing
-- ✅ Operational runbook with incident procedures
-- ✅ All files committed to git with descriptive messages
+- ✅ Structured logging + runbook
 - ✅ Production build passing
-
----
-
-## Architecture Comparison
-
-| Feature                  | Multi-Tenant (Old)     | Single Tenant Per User (Current) |
-| ------------------------ | ---------------------- | -------------------------------- |
-| User-Tenant Relationship | Many → 1               | 1 → 1                            |
-| Database Tables          | 10 (inc. tenant_users) | 9 (no tenant_users)              |
-| Team Collaboration       | ✅ Yes                 | ❌ No                            |
-| RBAC System              | ✅ Yes (3 roles)       | ❌ No                            |
-| RLS Complexity           | High (junction table)  | Low (direct lookup)              |
-| Onboarding               | Manual assignment      | Auto-create                      |
-| Use Case                 | Enterprise hotels      | Solo hotel owners                |
 
 ---
 
 ## Next Steps: Phase 1
 
-With Phase 0 complete, the foundation is solid for building the application UI and features. Phase 1 will focus on:
-
-1. **Task 1.1**: Base UI components (shadcn/ui integration)
-2. **Task 1.2**: App shell and navigation
-3. **Task 1.3**: Dashboard page with stats
-4. **Task 1.4**: Guests management page
-
-Before proceeding to Phase 1, you should:
-
-1. **Set up Supabase Project:**
-   - Create a new project at https://supabase.com
-   - Run `supabase/schema.sql` in the SQL Editor
-   - Copy project URL and keys to `.env.local`
-
-2. **Implement Signup Flow:**
-   - Create signup page with hotel name field
-   - Call `createTenantForUser()` after user signs up
-   - Redirect to dashboard after tenant creation
-
-3. **Test Authentication:**
-   - Verify middleware redirects work
-   - Test tenant auto-creation
-   - Confirm RLS policies block cross-user access
-
-4. **Review Documentation:**
-   - Read `docs/migrations.md` for schema change workflow
-   - Review `docs/runbook.md` for operational procedures
-   - Check `refactoring-summary.md` for architecture details
-
----
-
-## Important Notes
-
-### ⚠️ Limitations
-
-**Single Tenant Per User means:**
-
-- ❌ No team collaboration (cannot add staff/agents)
-- ❌ No multi-property management (one hotel per user)
-- ❌ Not scalable for team-based operations
-
-### 💡 When to Reconsider
-
-If you need:
-
-- Multiple users managing the same hotel
-- Role-based permissions (owner, admin, agent)
-- User managing multiple properties
-- Team collaboration features
-
-→ See `docs/architecture-analysis-single-tenant.md` for migration path to multi-tenant.
-
----
-
-## Summary
-
-Phase 0 successfully established a production-ready foundation for the Hotel PMS Integration & WhatsApp Automation Web App using a **single tenant per user** architecture. The simplified schema, automatic tenant creation, and streamlined RLS policies make it ideal for solo hotel owners.
-
-**Total Files Created:** 20+  
-**Total Commits:** 11  
-**Architecture:** Single Tenant Per User (1:1)  
-**Production Build:** ✅ Passing
+1. Set up Supabase project → run `supabase/schema.sql`
+2. Build signup page (owner flow with hotel name)
+3. Build invite page (owner sends staff invite)
+4. Build accept-invite callback route
+5. Phase 1: UI components, dashboard, guest management

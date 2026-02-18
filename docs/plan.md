@@ -6,7 +6,7 @@ Build a Next.js web app that integrates with hotel PMS systems to sync reservati
 
 ## Principles
 
-- Single tenant per user (1:1 relationship)
+- 1 tenant can have many users, but 1 user can only belong to 1 tenant
 - Security and reliability before feature breadth
 - Start with one PMS adapter for MVP, then scale adapters
 - Event-driven automation with idempotency and observability
@@ -44,7 +44,7 @@ Acceptance Criteria:
 - App starts locally with clear env validation errors
 - Missing env variables fail fast at startup (non-silent)
 
-### Task 0.2: Single tenant per user schema + RLS baseline
+### Task 0.2: Multi-user tenant schema + RLS baseline
 
 Files:
 
@@ -53,7 +53,8 @@ Files:
 
 Tables:
 
-- tenants (with user_id for 1:1 relationship)
+- tenants (hotel entity, no direct user_id)
+- tenant_users (junction: UNIQUE user_id enforces 1 user → max 1 tenant; roles: owner | staff)
 - pms_configurations
 - waha_configurations
 - guests
@@ -65,36 +66,45 @@ Tables:
 
 RLS Requirements:
 
-- All tenant-scoped tables require tenant_id policy
-- Direct user_id lookup from tenants table
-- Service role only for server-side privileged operations
+- All tenant-scoped tables require tenant_id policy via tenant_users lookup
+- Owners can manage tenant settings and members
+- Staff can access operational data (guests, reservations, messages)
+- Service role only for webhook and automation operations
 
 Acceptance Criteria:
 
-- Cross-user reads/writes are blocked by policy
-- User can only access their own tenant records
+- Cross-tenant reads/writes are blocked by policy
+- 1 user cannot be inserted into 2 different tenants (UNIQUE constraint)
+- Staff cannot modify tenant settings or invite others
 
-### Task 0.3: Auth, middleware, tenant context
+### Task 0.3: Auth, middleware, tenant context, invite flow
 
 Files:
 
 - Create: a-proposal2/lib/supabase/client.ts
 - Create: a-proposal2/lib/supabase/server.ts
+- Create: a-proposal2/lib/supabase/admin.ts
 - Create: a-proposal2/middleware.ts
 - Create: a-proposal2/lib/auth/tenant.ts
 - Create: a-proposal2/lib/auth/onboarding.ts
+- Create: a-proposal2/lib/auth/invitations.ts
 
 Rules:
 
 - Use cookie-based SSR client approach
 - Middleware refreshes auth session
-- Auto-create tenant on user signup
-- No RBAC needed (single tenant per user)
+- Owner registers → creates tenant → assigned as owner
+- Owner invites staff via email (Supabase Auth Admin API)
+- Invited staff accepts → tenant_users record created
+- Roles: owner (full control) | staff (operational access)
 
 Acceptance Criteria:
 
 - Protected routes redirect unauthenticated users
-- Tenant auto-created when user signs up
+- Owner can create tenant on registration
+- Owner can invite staff via email
+- Staff cannot create tenants or invite others
+- 1 user cannot belong to 2 tenants
 
 ### Task 0.4: Migration strategy and DB versioning
 

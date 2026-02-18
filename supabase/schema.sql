@@ -1,19 +1,37 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Tenants table (1:1 with users)
+-- ============================================================
+-- TENANTS
+-- 1 tenant = 1 hotel. Users join via tenant_users.
+-- ============================================================
 CREATE TABLE tenants (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID UNIQUE NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   slug TEXT UNIQUE NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Note: tenant_users table removed - single tenant per user model
+-- ============================================================
+-- TENANT USERS
+-- Junction table: 1 user can only belong to 1 tenant (UNIQUE user_id).
+-- Roles: owner (creates tenant, manages members) | staff (invited by owner)
+-- ============================================================
+CREATE TABLE tenant_users (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id UUID UNIQUE NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('owner', 'staff')),
+  invited_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  invited_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
--- PMS configurations table
+-- ============================================================
+-- PMS CONFIGURATIONS
+-- ============================================================
 CREATE TABLE pms_configurations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -26,7 +44,9 @@ CREATE TABLE pms_configurations (
   UNIQUE(tenant_id)
 );
 
--- WAHA configurations table
+-- ============================================================
+-- WAHA CONFIGURATIONS
+-- ============================================================
 CREATE TABLE waha_configurations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -40,7 +60,9 @@ CREATE TABLE waha_configurations (
   UNIQUE(tenant_id)
 );
 
--- Guests table
+-- ============================================================
+-- GUESTS
+-- ============================================================
 CREATE TABLE guests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -56,7 +78,9 @@ CREATE TABLE guests (
   UNIQUE(tenant_id, pms_guest_id)
 );
 
--- Reservations table
+-- ============================================================
+-- RESERVATIONS
+-- ============================================================
 CREATE TABLE reservations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -73,7 +97,9 @@ CREATE TABLE reservations (
   UNIQUE(tenant_id, pms_reservation_id)
 );
 
--- Message templates table
+-- ============================================================
+-- MESSAGE TEMPLATES
+-- ============================================================
 CREATE TABLE message_templates (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -85,7 +111,9 @@ CREATE TABLE message_templates (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Message logs table
+-- ============================================================
+-- MESSAGE LOGS
+-- ============================================================
 CREATE TABLE message_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -101,7 +129,9 @@ CREATE TABLE message_logs (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Inbound events table (dedupe/idempotency)
+-- ============================================================
+-- INBOUND EVENTS (dedupe / idempotency)
+-- ============================================================
 CREATE TABLE inbound_events (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -113,7 +143,9 @@ CREATE TABLE inbound_events (
   UNIQUE(tenant_id, event_id)
 );
 
--- Automation jobs table (queue state)
+-- ============================================================
+-- AUTOMATION JOBS (queue state)
+-- ============================================================
 CREATE TABLE automation_jobs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -130,10 +162,12 @@ CREATE TABLE automation_jobs (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Row Level Security Policies
+-- ============================================================
+-- ROW LEVEL SECURITY
+-- ============================================================
 
--- Enable RLS on all tables
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pms_configurations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE waha_configurations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guests ENABLE ROW LEVEL SECURITY;
@@ -143,68 +177,123 @@ ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbound_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE automation_jobs ENABLE ROW LEVEL SECURITY;
 
--- Users can only see and manage their own tenant
-CREATE POLICY "Users can manage their tenant" ON tenants
-  FOR ALL USING (user_id = auth.uid());
+-- Helper: get current user's tenant_id
+-- Used in policies below
+-- (Inline subquery for clarity)
 
--- PMS configurations policies
-CREATE POLICY "Users can manage their PMS config" ON pms_configurations
-  FOR ALL USING (
-    tenant_id IN (
-      SELECT id FROM tenants WHERE user_id = auth.uid()
-    )
-  );
-
--- WAHA configurations policies
-CREATE POLICY "Users can manage their WAHA config" ON waha_configurations
-  FOR ALL USING (
-    tenant_id IN (
-      SELECT id FROM tenants WHERE user_id = auth.uid()
-    )
-  );
-
--- Guests policies
-CREATE POLICY "Users can manage their guests" ON guests
-  FOR ALL USING (
-    tenant_id IN (
-      SELECT id FROM tenants WHERE user_id = auth.uid()
-    )
-  );
-
--- Reservations policies
-CREATE POLICY "Users can manage their reservations" ON reservations
-  FOR ALL USING (
-    tenant_id IN (
-      SELECT id FROM tenants WHERE user_id = auth.uid()
-    )
-  );
-
--- Message templates policies
-CREATE POLICY "Users can manage their templates" ON message_templates
-  FOR ALL USING (
-    tenant_id IN (
-      SELECT id FROM tenants WHERE user_id = auth.uid()
-    )
-  );
-
--- Message logs policies
-CREATE POLICY "Users can view their message logs" ON message_logs
+-- TENANTS: any member can view, only owner can update/delete
+CREATE POLICY "Members can view their tenant" ON tenants
   FOR SELECT USING (
-    tenant_id IN (
-      SELECT id FROM tenants WHERE user_id = auth.uid()
+    id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Owners can update their tenant" ON tenants
+  FOR UPDATE USING (
+    id IN (
+      SELECT tenant_id FROM tenant_users
+      WHERE user_id = auth.uid() AND role = 'owner'
     )
   );
 
--- Inbound events policies (service role only)
-CREATE POLICY "Service role can manage inbound events" ON inbound_events
+-- TENANT_USERS: members can view, only owner can insert/update/delete
+CREATE POLICY "Members can view tenant members" ON tenant_users
+  FOR SELECT USING (
+    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Owners can manage tenant members" ON tenant_users
+  FOR INSERT WITH CHECK (
+    tenant_id IN (
+      SELECT tenant_id FROM tenant_users
+      WHERE user_id = auth.uid() AND role = 'owner'
+    )
+  );
+
+CREATE POLICY "Owners can update tenant members" ON tenant_users
+  FOR UPDATE USING (
+    tenant_id IN (
+      SELECT tenant_id FROM tenant_users
+      WHERE user_id = auth.uid() AND role = 'owner'
+    )
+  );
+
+CREATE POLICY "Owners can delete tenant members" ON tenant_users
+  FOR DELETE USING (
+    tenant_id IN (
+      SELECT tenant_id FROM tenant_users
+      WHERE user_id = auth.uid() AND role = 'owner'
+    )
+  );
+
+-- Allow new owner to insert themselves (during onboarding)
+CREATE POLICY "Users can join as owner during onboarding" ON tenant_users
+  FOR INSERT WITH CHECK (user_id = auth.uid() AND role = 'owner');
+
+-- PMS CONFIGURATIONS: all members can view, only owner can manage
+CREATE POLICY "Members can view PMS config" ON pms_configurations
+  FOR SELECT USING (
+    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Owners can manage PMS config" ON pms_configurations
+  FOR ALL USING (
+    tenant_id IN (
+      SELECT tenant_id FROM tenant_users
+      WHERE user_id = auth.uid() AND role = 'owner'
+    )
+  );
+
+-- WAHA CONFIGURATIONS: all members can view, only owner can manage
+CREATE POLICY "Members can view WAHA config" ON waha_configurations
+  FOR SELECT USING (
+    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Owners can manage WAHA config" ON waha_configurations
+  FOR ALL USING (
+    tenant_id IN (
+      SELECT tenant_id FROM tenant_users
+      WHERE user_id = auth.uid() AND role = 'owner'
+    )
+  );
+
+-- GUESTS: all members can manage
+CREATE POLICY "Members can manage guests" ON guests
+  FOR ALL USING (
+    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
+  );
+
+-- RESERVATIONS: all members can manage
+CREATE POLICY "Members can manage reservations" ON reservations
+  FOR ALL USING (
+    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
+  );
+
+-- MESSAGE TEMPLATES: all members can manage
+CREATE POLICY "Members can manage templates" ON message_templates
+  FOR ALL USING (
+    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
+  );
+
+-- MESSAGE LOGS: all members can view
+CREATE POLICY "Members can view message logs" ON message_logs
+  FOR SELECT USING (
+    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
+  );
+
+-- INBOUND EVENTS: service role only (webhooks)
+CREATE POLICY "Service role manages inbound events" ON inbound_events
   FOR ALL USING (true);
 
--- Automation jobs policies (service role only)
-CREATE POLICY "Service role can manage automation jobs" ON automation_jobs
+-- AUTOMATION JOBS: service role only
+CREATE POLICY "Service role manages automation jobs" ON automation_jobs
   FOR ALL USING (true);
 
--- Indexes for performance
-CREATE INDEX idx_tenants_user_id ON tenants(user_id);
+-- ============================================================
+-- INDEXES
+-- ============================================================
+CREATE INDEX idx_tenant_users_tenant_id ON tenant_users(tenant_id);
+-- idx_tenant_users_user_id is implicit from UNIQUE constraint
 CREATE INDEX idx_guests_tenant_id ON guests(tenant_id);
 CREATE INDEX idx_reservations_tenant_id ON reservations(tenant_id);
 CREATE INDEX idx_reservations_status ON reservations(status);
