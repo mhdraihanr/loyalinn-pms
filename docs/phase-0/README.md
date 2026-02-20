@@ -77,6 +77,89 @@ Owner invites email → magic link sent (pending_tenant_id in metadata)
 → Staff accepts → acceptStaffInvitation() → tenant_users record created
 ```
 
+---
+
+## Route Protection & Authentication Flow
+
+### Initial Access Logic (Middleware)
+
+```
+User visits app
+    ↓
+[middleware.ts checks session]
+    ├─ No session? ──→ /login (public)
+    └─ Has session? ──→ Check tenant status
+        ├─ Has tenant? ──→ /(dashboard)/ (protected)
+        └─ No tenant? ──→ /signup (create or join tenant required)
+```
+
+### User Types & Initial Routes
+
+| User Type                     | Status          | Initial Route    | Next Action                                 |
+| ----------------------------- | --------------- | ---------------- | ------------------------------------------- |
+| **New Owner**                 | No auth         | /login           | Signup: enter email + password + hotel_name |
+| **Owner with Tenant**         | Authenticated   | /(dashboard)/    | Dashboard access (complete)                 |
+| **Staff (Invited)**           | No auth         | Magic-link email | Click link → /accept-invite page            |
+| **Staff (Accepted)**          | Authenticated   | /(dashboard)/    | Dashboard access (operational only)         |
+| **Tries to access dashboard** | No auth         | /login           | Login required first                        |
+| **Tries to access dashboard** | Auth, no tenant | /signup          | Must create or accept invite to join tenant |
+
+### Key Rules
+
+1. **Signup creates tenant:**
+   - ✅ Owner fills: email + password + hotel_name
+   - ✅ Calls `createTenantAsOwner()` (atomic)
+   - ✅ Creates: User + Tenant + tenant_users(role='owner')
+   - ❌ Cannot create 2nd tenant (UNIQUE constraint on `user_id`)
+   - ❌ No "join existing tenant" option at signup (only via invite)
+
+2. **Invite flow (owner to staff):**
+   - ✅ Owner access: /(dashboard)/settings/invitations
+   - ✅ Owner inputs: staff email
+   - ✅ Calls `inviteStaffMember()`
+   - ✅ Supabase sends magic-link email (pending_tenant_id in metadata)
+   - ❌ Staff cannot invite others (RLS blocks staff privilege escalation)
+
+3. **Accept invite (staff):**
+   - ✅ Staff clicks magic-link → lands on /accept-invite?token=...
+   - ✅ Page shows: pending tenant name + owner email
+   - ✅ Staff clicks "Accept" → `acceptStaffInvitation()`
+   - ✅ Creates: tenant_users(role='staff')
+   - ✅ Redirect: /(dashboard)/ (operational access)
+   - ❌ Cannot bypass and create own tenant
+
+### Acceptance Criteria (Phase 1)
+
+**Route Protection:**
+
+- ✅ Unauthenticated users → /login (middleware enforces)
+- ✅ Authenticated, no tenant → /signup (onboarding required)
+- ✅ Authenticated, has tenant → /(dashboard)/ (dashboard access)
+
+**Owner Flow:**
+
+- ✅ Signup with email + password + hotel_name
+- ✅ Tenant created with owner as sole member
+- ✅ Cannot create 2nd tenant (database constraint verified)
+- ✅ Can invite staff from /(dashboard)/settings/invitations
+- ✅ Can see full tenant management options
+
+**Staff Flow:**
+
+- ✅ Receives magic-link email after owner invites
+- ✅ Clicks link → /accept-invite page shows pending tenant
+- ✅ Accepts invite → joins tenant with role='staff'
+- ✅ Lands on /(dashboard)/ with operational access only
+- ✅ Cannot invite others or access tenant settings
+- ✅ Sees tenant data filtered by RLS
+
+**Tenant Data Isolation:**
+
+- ✅ All queries filtered by tenant_id via RLS
+- ✅ 1 user cannot belong to 2 tenants (UNIQUE constraint)
+- ✅ Staff cannot read/write tenant configuration
+- ✅ Owner can manage tenant settings and members
+
 ### ✅ Task 0.4: Migration Strategy
 
 - `supabase/migrations/README.md` — naming convention

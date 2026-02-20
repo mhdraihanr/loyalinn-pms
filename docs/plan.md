@@ -55,6 +55,7 @@ Tables:
 
 - tenants (hotel entity, no direct user_id)
 - tenant_users (junction: UNIQUE user_id enforces 1 user → max 1 tenant; roles: owner | staff)
+- invitations (staff invite tracking — token, status, expiry, invited_email)
 - pms_configurations
 - waha_configurations
 - guests
@@ -77,25 +78,25 @@ Acceptance Criteria:
 - 1 user cannot be inserted into 2 different tenants (UNIQUE constraint)
 - Staff cannot modify tenant settings or invite others
 
-### Task 0.3: Auth, middleware, tenant context, invite flow
+### Task 0.3: Auth, middleware, tenant context, invite flow ✅
 
 Files:
 
 - Create: a-proposal2/lib/supabase/client.ts
 - Create: a-proposal2/lib/supabase/server.ts
-- Create: a-proposal2/lib/supabase/admin.ts
+- Create: a-proposal2/lib/supabase/admin.ts (service role, bypasses RLS)
 - Create: a-proposal2/middleware.ts
-- Create: a-proposal2/lib/auth/tenant.ts
-- Create: a-proposal2/lib/auth/onboarding.ts
-- Create: a-proposal2/lib/auth/invitations.ts
+- Create: a-proposal2/lib/auth/tenant.ts (getCurrentUserTenant, requireOwner)
+- Create: a-proposal2/lib/auth/onboarding.ts (createTenantAsOwner with duplicate guard)
+- Create: a-proposal2/lib/auth/invitations.ts (inviteStaffMember, acceptStaffInvitation)
 
 Rules:
 
 - Use cookie-based SSR client approach
 - Middleware refreshes auth session
 - Owner registers → creates tenant → assigned as owner
-- Owner invites staff via email (Supabase Auth Admin API)
-- Invited staff accepts → tenant_users record created
+- Owner invites staff via email (Supabase Auth Admin API with user_metadata)
+- Invited staff accepts → tenant_users record created via acceptStaffInvitation()
 - Roles: owner (full control) | staff (operational access)
 
 Acceptance Criteria:
@@ -136,9 +137,9 @@ Acceptance Criteria:
 
 ---
 
-## Phase 1: Core UI and Tenant Dashboard
+## Phase 1: Core UI and Tenant Dashboard ✅ COMPLETED
 
-### Task 1.1: Base UI components
+### Task 1.1: Base UI components ✅
 
 Files:
 
@@ -151,17 +152,19 @@ Files:
 - Create: a-proposal2/components/ui/badge.tsx
 - Create: a-proposal2/components/ui/tabs.tsx
 
-### Task 1.2: App shell and navigation
+### Task 1.2: App shell and navigation ✅
 
 Files:
 
 - Create: a-proposal2/app/layout.tsx
 - Create: a-proposal2/app/globals.css
-- Create: a-proposal2/app/(auth)/login/page.tsx
+- Create: a-proposal2/app/(auth)/layout.tsx
 - Create: a-proposal2/app/(dashboard)/layout.tsx
 - Create: a-proposal2/components/layout/sidebar.tsx
+- Create: a-proposal2/components/layout/logout-button.tsx (with confirmation modal)
+- Create: a-proposal2/lib/auth/logout.ts (server action)
 
-### Task 1.3: Dashboard page
+### Task 1.3: Dashboard page ✅
 
 Files:
 
@@ -172,7 +175,7 @@ Features:
 - Stats cards: total guests, active reservations, messages sent, occupancy rate
 - Recent reservations list
 
-### Task 1.4: Guests management page
+### Task 1.4: Guests management page ✅
 
 Files:
 
@@ -190,10 +193,240 @@ Columns:
 - Joined
 - Actions
 
+### Task 1.5: Auth UI — signup, login, accept-invite ✅
+
+Files:
+
+- Create: a-proposal2/app/(auth)/signup/page.tsx
+- Create: a-proposal2/app/(auth)/login/page.tsx
+- Create: a-proposal2/app/(auth)/accept-invite/page.tsx
+- Create: a-proposal2/lib/auth/signup.ts (server action)
+- Create: a-proposal2/lib/auth/login.ts (server action)
+
+#### Authentication & Routing Flow
+
+**Initial Access:**
+
+```
+User visits app
+    ↓
+[Middleware checks session]
+    ├─ No session? → /login
+    └─ Has session? → Check tenant
+        ├─ Has tenant? → /(dashboard)/
+        └─ No tenant? → /onboarding
+```
+
+**Sign Up (Account creation only - email + password):**
+
+```
+/signup page:
+  - Input: email + password + confirm password (required)
+  - Validation: email format, password strength (min 8 chars)
+  - Action: supabase.auth.signUp({ email, password })
+  - Result:
+    ✓ User created in Supabase Auth
+    ✓ No tenant assigned yet
+  - Redirect: /login (user must login to proceed)
+```
+
+**Login (Email + Password):**
+
+```
+/login page:
+  - Input: email + password (required)
+  - Action: supabase.auth.signInWithPassword({ email, password })
+  - Result on success:
+    ✓ User authenticated
+    ✓ Session created (cookie-based)
+  - Middleware check on next request:
+    ~ User has tenant? → /(dashboard)/
+    ~ User has no tenant? → /onboarding
+  - Result on error:
+    ✗ "Email or password is incorrect"
+    ✗ "Too many login attempts, try again later"
+```
+
+**Onboarding (Role selection):**
+
+```
+/onboarding page:
+  - Displays two options:
+    1️⃣ "I own a hotel" (Create Tenant)
+    2️⃣ "I'm invited to a hotel" (Accept Invite)
+
+  Option 1: Create Tenant
+    - Redirect to: /onboarding/create-tenant
+    - Input: hotel_name (required, 3-100 chars)
+    - Action: createTenantAsOwner(userId, hotelName)
+    - Result:
+      ✓ Tenant created in tenants table
+      ✓ tenant_users record created (role='owner')
+      ✓ User assigned as owner
+    - Redirect: /(dashboard)/
+
+  Option 2: Accept Invite
+    - Wait for owner to send staff invite via email
+    - Owner invites from: /(dashboard)/settings/invitations
+    - Staff receives magic-link email with /accept-invite?token=...
+```
+
+**Staff Invite (Owner invites staff from dashboard):**
+
+```
+Owner clicks "Invite Staff" → /(dashboard)/settings/invitations
+  - Input: staff email
+  - Action: inviteStaffMember(ownerUserId, staffEmail)
+  - Result:
+    ✓ Record inserted into invitations table:
+        { tenant_id, invited_email, invited_by, token (uuid), status='pending',
+          expires_at = NOW() + 7 days }
+    ✓ Email sent to staff with link: /accept-invite?token=<uuid>
+```
+
+**Staff clicks invite link → /accept-invite?token=<uuid>:**
+
+```
+[Server: look up invitations record by token (admin client)]
+    ├─ Not found / expired?  → show error: "Link expired. Ask your hotel owner to re-invite you."
+    ├─ Already accepted?     → redirect /login
+    └─ Valid (pending)?
+         ↓
+    [Check: is invited_email already a registered Supabase user?]
+         ├─ NOT registered (new staff)
+         │   → redirect /signup?invite_token=<token>
+         │       - Email pre-filled from invitations.invited_email (readonly, cannot be changed)
+         │       - Input: password + confirm password
+         │       - Action: supabase.auth.signUp({ email, password })
+         │       - Result: user created + auto-logged in
+         │       → redirect /accept-invite?token=<token>
+         │
+         └─ Already registered
+              ├─ Not logged in → redirect /login?invite_token=<token>
+              │                  → after login → redirect /accept-invite?token=<token>
+              └─ Logged in
+                   → display: tenant name, invited by
+                   → "Accept Invite" button
+                   → acceptStaffInvitation(userId, token)
+                   → Result:
+                       ✓ tenant_users record created (role='staff')
+                       ✓ invitations.status updated to 'accepted'
+                       ✓ invitations.accepted_by = userId
+                   → redirect /(dashboard)/
+```
+
+**Rules:**
+
+- **Signup:** email + password ONLY (no hotel_name)
+  - User account created, NO tenant assigned
+  - User must login and complete onboarding after signup
+  - Cannot create 2nd account with same email (Supabase enforces)
+- **Login:** email + password form (standard approach)
+  - Middleware auto-checks tenant → route to /onboarding or /dashboard
+  - Session persists until explicit logout (15 min inactivity timeout)
+- **Onboarding:** 2-way choice
+  - Owner: input hotel_name → createTenantAsOwner() → /(dashboard)/
+  - Staff: wait for invite, OR if invited already can proceed directly
+- **Accept Invite:** only accessible via token in `invitations` table
+  - Email on signup form is locked (readonly) to `invitations.invited_email`
+  - Staff cannot change email to bypass invite-to-email pairing
+  - Cannot accept same invite twice (`status` becomes `accepted` after first accept)
+  - Expired after 7 days (`expires_at`) — owner must re-invite
+  - Token is UUID — not guessable
+- **Dashboard access:** requires valid tenant_id
+  - Middleware enforces all flows
+
+### Task 1.6: Onboarding flow and create tenant page ✅
+
+Files:
+
+- Create: a-proposal2/app/(auth)/onboarding/page.tsx
+- Create: a-proposal2/app/(auth)/onboarding/create-tenant/page.tsx
+- Create: a-proposal2/lib/auth/onboarding.ts (updated with new flow)
+
+**Onboarding page:**
+
+- Display: "Welcome! Choose how you'd like to get started"
+- Option 1 button: "I own a hotel" → /onboarding/create-tenant
+- Option 2 button: "I was invited to a hotel" → show help text (wait for email)
+
+**Create Tenant page:**
+
+- Form: hotel_name input (required, 3-100 chars, alpha+space+special)
+- Button: "Create Tenant"
+- On submit:
+  - Client validation: hotel_name length + format
+  - Server action: createTenantAsOwner(userId, hotelName)
+  - On error: show validation errors
+  - On success: redirect /(dashboard)/ with toast "Tenant created!"
+
+#### User Types & Initial Routes
+
+| Scenario                                             | Flow                                                                  | Pages                                                        |
+| ---------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Brand new user (owner)                               | signup → login → onboarding → create-tenant                           | `/signup`, `/login`, `/onboarding/create-tenant`             |
+| Owner with existing tenant                           | login → dashboard                                                     | `/login`, `/`                                                |
+| Staff invited, **not yet registered**                | click invite link → signup (email locked) → accept-invite → dashboard | `/accept-invite`, `/signup?invite_token=X`, `/accept-invite` |
+| Staff invited, **already registered**, not logged in | click invite link → login → accept-invite → dashboard                 | `/accept-invite`, `/login?invite_token=X`, `/accept-invite`  |
+| Staff invited, **already registered**, logged in     | click invite link → accept-invite → dashboard                         | `/accept-invite`                                             |
+| Staff invite expired (>7 days)                       | click invite link → error page                                        | `/accept-invite`                                             |
+| Staff invite already accepted                        | click invite link → redirect login                                    | `/login`                                                     |
+| Staff without invite (onboarding)                    | login → onboarding → wait for owner                                   | `/login`, `/onboarding`                                      |
+| Auth user, no tenant                                 | login → onboarding                                                    | `/login`, `/onboarding`                                      |
+
 Acceptance Criteria (Phase 1):
 
-- Tenant user sees only tenant data
-- Guest table supports basic pagination and empty states
+- ✅ Unauthenticated user lands on /login
+- ✅ Signup creates user account (email + password only, no tenant)
+- ✅ After signup, user must login to proceed
+- ✅ After login without tenant, user redirected to /onboarding
+- ✅ Owner can create tenant from /onboarding/create-tenant
+- ✅ Owner cannot create 2nd tenant (UNIQUE constraint enforced)
+- ✅ Staff can be invited by owner via /(dashboard)/settings/invitations
+- ✅ Invite stored in `invitations` table with UUID token + 7-day expiry
+- ✅ Staff receives invite email with /accept-invite?token=<uuid>
+- ✅ **Staff NOT registered:** /accept-invite → /signup (email locked, readonly) → accept → dashboard
+- ✅ **Staff already registered:** /accept-invite → /login (if not logged in) → accept → dashboard
+- ✅ Expired invite (>7 days) shows error, does not create tenant_users record
+- ✅ Already-accepted token cannot be reused
+- ✅ Staff email on signup is locked to invited email — cannot be changed
+- ✅ Staff who accept invite land on /(dashboard)/ as role='staff'
+- ✅ Tenant user sees only tenant data (RLS enforced)
+- ✅ Staff cannot invite others or create tenants
+- ✅ User cannot belong to 2 tenants (database constraint verified)
+- ✅ Session timeout: 15 min inactivity → auto logout → /login
+
+**Migration required:**
+
+```sql
+-- Migration: YYYYMMDDHHMMSS_add_invitations_table.sql
+CREATE TABLE invitations (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id    UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  invited_email TEXT NOT NULL,
+  invited_by   UUID NOT NULL REFERENCES auth.users(id),
+  token        UUID NOT NULL DEFAULT uuid_generate_v4() UNIQUE,
+  status       TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'accepted', 'expired')),
+  expires_at   TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days'),
+  accepted_by  UUID REFERENCES auth.users(id),
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE invitations ENABLE ROW LEVEL SECURITY;
+
+-- Owner can manage invitations for their tenant
+CREATE POLICY "Owners can manage invitations" ON invitations
+  FOR ALL USING (
+    tenant_id IN (
+      SELECT tenant_id FROM tenant_users
+      WHERE user_id = auth.uid() AND role = 'owner'
+    )
+  );
+
+-- Service role reads invitation by token (for accept-invite page)
+-- Handled via admin client — no public policy needed
+```
 
 ---
 
@@ -297,10 +530,59 @@ Security Requirement:
 - Encrypt sensitive credentials before storing
 - Mask credentials in UI and logs
 
+### Task 3.4: Team management — members + invitations
+
+**Route:** `/settings/team` (owner only)
+
+Files:
+
+- Create: `a-proposal2/app/(dashboard)/settings/team/page.tsx`
+- Create: `a-proposal2/components/settings/team/members-table.tsx`
+- Create: `a-proposal2/components/settings/team/invitations-table.tsx`
+- Create: `a-proposal2/components/settings/team/invite-staff-form.tsx`
+- Update: `a-proposal2/lib/auth/invitations.ts` — add `resendInvitation()`, `revokeInvitation()`, `removeStaffMember()`
+
+**Page layout (two sections):**
+
+```
+/settings/team
+├── Section: Active Members
+│   ├── Avatar + email, role badge, joined date
+│   └── "Remove" button (owner only, cannot remove self)
+│
+└── Section: Pending Invitations
+    ├── Email, invited by, sent date, expires date, status badge (pending / expired)
+    ├── "Resend" button → reset token + expires_at + re-send email
+    └── "Revoke" button → set status='expired' → token immediately invalid
+```
+
+**Server actions / lib functions:**
+
+| Function                                       | Behavior                                             |
+| ---------------------------------------------- | ---------------------------------------------------- |
+| `inviteStaffMember(ownerUserId, email)`        | Insert row into `invitations`, send email            |
+| `resendInvitation(ownerUserId, invitationId)`  | Update token + expires_at on same row, re-send email |
+| `revokeInvitation(ownerUserId, invitationId)`  | Set `status='expired'`                               |
+| `removeStaffMember(ownerUserId, targetUserId)` | Delete from `tenant_users` — cannot remove self      |
+
+**Edge cases:**
+
+- Resend: old token immediately invalid (replaced in same row)
+- Revoke: `/accept-invite` page gets "Link expired" for revoked token
+- Remove staff: removed user's next request → dashboard layout redirects to `/onboarding`
+- Owner cannot remove themselves (guard in server action)
+- Staff cannot see or access `/settings/team` (middleware or layout guard)
+
 Acceptance Criteria (Phase 3):
 
 - WAHA session can be connected via QR
 - Test message can be sent successfully from settings
+- Owner can view all active members and pending invitations
+- Owner can resend an invite (old token invalidated, new token issued)
+- Owner can revoke a pending invite (token immediately unusable)
+- Owner can remove a staff member (removed user lands on /onboarding on next visit)
+- Owner cannot remove themselves
+- Staff cannot access `/settings/team`
 
 ---
 

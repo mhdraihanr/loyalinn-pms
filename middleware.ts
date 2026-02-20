@@ -31,19 +31,36 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Protect dashboard routes
-  if (!user && request.nextUrl.pathname.startsWith("/dashboard")) {
+  const { pathname } = request.nextUrl;
+
+  // Public auth routes (accessible without login)
+  const publicAuthRoutes = ["/login", "/signup", "/accept-invite"];
+  const isPublicAuthRoute = publicAuthRoutes.some((r) =>
+    pathname.startsWith(r),
+  );
+
+  // Protected routes that require login
+  const protectedPrefixes = ["/guests", "/reservations", "/settings"];
+  const isProtectedRoute =
+    pathname === "/" || protectedPrefixes.some((p) => pathname.startsWith(p));
+
+  if (!user && isProtectedRoute) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // Redirect authenticated users from auth pages
-  if (
-    user &&
-    (request.nextUrl.pathname === "/login" ||
-      request.nextUrl.pathname === "/signup")
-  ) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+  // Protect onboarding routes — must be authenticated
+  if (!user && pathname.startsWith("/onboarding")) {
+    return NextResponse.redirect(new URL("/login", request.url));
   }
+
+  // Authenticated users visiting login/signup
+  // redirect to dashboard (tenant check handled in dashboard layout)
+  if (user && isPublicAuthRoute) {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+
+  // Tenant membership check is handled in dashboard layout.
+  // Avoid querying tenant_users here to prevent false negatives from RLS.
 
   return response;
 }
