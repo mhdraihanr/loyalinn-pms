@@ -276,6 +276,7 @@ a-proposal2/
 | Single signup flow                              | **Two modes:** normal owner signup + invite-locked staff signup         |
 | `components/ui/*` primitives                    | Not needed — Mantine provides all primitives                            |
 | `accept-invite-button.tsx` co-located in `app/` | Moved to `components/auth/`                                             |
+| Page components fetch data directly             | **Extracted to `lib/data/`** for better separation of concerns          |
 
 ---
 

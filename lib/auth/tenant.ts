@@ -1,4 +1,5 @@
 import { createClient } from "../supabase/server";
+import { createAdminClient } from "../supabase/admin";
 
 export type UserTenant = {
   tenantId: string;
@@ -17,7 +18,8 @@ export async function getCurrentUserTenant(): Promise<UserTenant | null> {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: tenantUser } = await supabase
+  const adminClient = createAdminClient();
+  const { data: tenantUser } = await adminClient
     .from("tenant_users")
     .select("tenant_id, role")
     .eq("user_id", user.id)

@@ -53,9 +53,12 @@ function LoginForm() {
 
         <form action={action}>
           {/* Pass invite_token through login so server action can redirect correctly */}
-          {inviteToken && (
-            <input type="hidden" name="invite_token" value={inviteToken} />
-          )}
+          <input
+            type="hidden"
+            name="invite_token"
+            value={inviteToken || ""}
+            suppressHydrationWarning
+          />
 
           <Stack gap="md">
             <TextInput
@@ -89,6 +92,7 @@ function LoginForm() {
             }
             size="sm"
             fw={500}
+            suppressHydrationWarning
           >
             Create account
           </Anchor>

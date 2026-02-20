@@ -169,6 +169,7 @@ Files:
 Files:
 
 - Create/Modify: a-proposal2/app/(dashboard)/page.tsx
+- Create: a-proposal2/lib/data/dashboard.ts
 
 Features:
 
@@ -181,6 +182,7 @@ Files:
 
 - Create: a-proposal2/app/(dashboard)/guests/page.tsx
 - Create: a-proposal2/components/guests/guests-table.tsx
+- Create: a-proposal2/lib/data/guests.ts
 
 Columns:
 
