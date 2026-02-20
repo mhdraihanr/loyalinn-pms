@@ -1,0 +1,26 @@
+
+> temp-next-app@0.1.0 lint
+> eslint
+
+
+D:\a-proposal2\.agents\skills\superpowers\skills\writing-skills\render-graphs.js
+  16:12  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  17:14  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  18:22  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+D:\a-proposal2\.kilocode\skills\writing-skills\render-graphs.js
+  16:12  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  17:14  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  18:22  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+D:\a-proposal2\app\(dashboard)\guests\page.tsx
+   9:3  warning  'Badge' is defined but never used   @typescript-eslint/no-unused-vars
+  10:3  warning  'Box' is defined but never used     @typescript-eslint/no-unused-vars
+  11:3  warning  'Avatar' is defined but never used  @typescript-eslint/no-unused-vars
+
+D:\a-proposal2\middleware.ts
+  5:7  error  'response' is never reassigned. Use 'const' instead  prefer-const
+
+✖ 10 problems (7 errors, 3 warnings)
+  1 error and 0 warnings potentially fixable with the `--fix` option.
+

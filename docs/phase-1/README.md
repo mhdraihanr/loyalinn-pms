@@ -202,13 +202,16 @@ a-proposal2/
 │   └── layout/
 │       └── sidebar.tsx                     # Nav + tenant name + role badge
 ├── lib/
-│   └── auth/
-│       ├── login.ts                        # Server action (invite_token redirect)
-│       ├── logout.ts                       # Server action
-│       ├── signup.ts                       # Server action (invite + normal modes)
-│       ├── onboarding.ts                   # createTenantAsOwner
-│       ├── invitations.ts                  # getInvitationByToken, invite, accept
-│       └── tenant.ts                       # getCurrentUserTenant, requireOwner
+│   ├── auth/
+│   │   ├── login.ts                        # Server action (invite_token redirect)
+│   │   ├── logout.ts                       # Server action
+│   │   ├── signup.ts                       # Server action (invite + normal modes)
+│   │   ├── onboarding.ts                   # createTenantAsOwner
+│   │   ├── invitations.ts                  # getInvitationByToken, invite, accept
+│   │   └── tenant.ts                       # getCurrentUserTenant, requireOwner
+│   └── data/
+│       ├── dashboard.ts                    # Extracted dashboard data queries
+│       └── guests.ts                       # Extracted guests data queries
 └── supabase/
     └── migrations/
         └── 20260218000000_add_invitations_table.sql

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { getCurrentUserTenant } from "@/lib/auth/tenant";
+import { getDashboardStats, getRecentReservations } from "@/lib/data/dashboard";
 import {
   SimpleGrid,
   Card,
@@ -20,50 +20,6 @@ import {
   IconBuildingSkyscraper,
 } from "@tabler/icons-react";
 
-async function getDashboardStats(tenantId: string) {
-  const supabase = await createClient();
-
-  const [
-    { count: guestCount },
-    { count: reservationCount },
-    { count: messageCount },
-  ] = await Promise.all([
-    supabase
-      .from("guests")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", tenantId),
-    supabase
-      .from("reservations")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", tenantId)
-      .in("status", ["confirmed", "checked_in"]),
-    supabase
-      .from("message_logs")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", tenantId)
-      .eq("status", "sent"),
-  ]);
-
-  return {
-    guests: guestCount ?? 0,
-    activeReservations: reservationCount ?? 0,
-    messagesSent: messageCount ?? 0,
-  };
-}
-
-async function getRecentReservations(tenantId: string) {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("reservations")
-    .select(
-      "id, guest_name, room_number, check_in_date, check_out_date, status",
-    )
-    .eq("tenant_id", tenantId)
-    .order("created_at", { ascending: false })
-    .limit(8);
-  return data ?? [];
-}
-
 const statusColors: Record<string, string> = {
   confirmed: "blue",
   checked_in: "green",
@@ -73,21 +29,11 @@ const statusColors: Record<string, string> = {
 };
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const userTenant = await getCurrentUserTenant();
 
-  const admin = createAdminClient();
-  const { data: tenantUser } = await admin
-    .from("tenant_users")
-    .select("tenant_id")
-    .eq("user_id", user!.id)
-    .maybeSingle();
+  if (!userTenant) redirect("/onboarding");
 
-  if (!tenantUser) redirect("/onboarding");
-
-  const tenantId = tenantUser.tenant_id;
+  const tenantId = userTenant.tenantId;
   const [stats, reservations] = await Promise.all([
     getDashboardStats(tenantId),
     getRecentReservations(tenantId),
