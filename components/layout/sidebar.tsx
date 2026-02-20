@@ -33,6 +33,7 @@ const navItems = [
     icon: IconCalendarEvent,
   },
   { href: "/settings", label: "Settings", icon: IconSettings },
+  { href: "/settings/pms", label: "PMS Config", icon: IconSettings },
 ];
 
 export function Sidebar({ hotelName }: { hotelName: string }) {

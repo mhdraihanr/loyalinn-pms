@@ -4,12 +4,12 @@ import { Table, Text, Badge, Avatar, Group, Box, Stack } from "@mantine/core";
 
 type Guest = {
   id: string;
-  full_name: string | null;
+  name: string | null;
   phone: string | null;
   email: string | null;
   country: string | null;
   tier: string | null;
-  loyalty_points: number | null;
+  points: number | null;
   created_at: string | null;
 };
 
@@ -75,10 +75,10 @@ export function GuestsTable({ guests }: { guests: Guest[] }) {
             <Table.Td>
               <Group gap="sm">
                 <Avatar size={32} radius="xl" color="blue">
-                  {getInitials(guest.full_name)}
+                  {getInitials(guest.name)}
                 </Avatar>
                 <Text size="sm" fw={500}>
-                  {guest.full_name ?? "—"}
+                  {guest.name ?? "—"}
                 </Text>
               </Group>
             </Table.Td>
@@ -114,7 +114,7 @@ export function GuestsTable({ guests }: { guests: Guest[] }) {
               )}
             </Table.Td>
             <Table.Td>
-              <Text size="sm">{guest.loyalty_points ?? 0}</Text>
+              <Text size="sm">{guest.points ?? 0}</Text>
             </Table.Td>
             <Table.Td>
               <Text size="sm" c="dimmed">

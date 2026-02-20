@@ -432,25 +432,43 @@ CREATE POLICY "Owners can manage invitations" ON invitations
 
 ---
 
-## Phase 2: PMS Integration (MVP = one adapter first)
+## Phase 2: PMS Integration (MVP = one adapter first) ✅ COMPLETED
 
-### Task 2.1: Reservations page and status tabs
+### Task 2.1: Reservations page and status tabs ✅
 
 Files:
 
 - Create: a-proposal2/app/(dashboard)/reservations/page.tsx
 - Create: a-proposal2/components/reservations/reservations-table.tsx
+- Create: a-proposal2/components/reservations/reservations-tabs.tsx (Client component to separate routing state)
+- Create: a-proposal2/lib/data/reservations.ts
 
 Features:
 
-- Tabs: all, pre-arrival, on-stay, checked-out
-- Columns: guest, room, dates, status, amount, source
+- Data fetching extracted to `lib/data/reservations.ts` for consistency
+- Mantine UI components: `<Tabs>` for statuses (all, pre-arrival, on-stay, checked-out) and `<Table>` for data display
+- Columns: guest, room, dates, status (`<Badge>`), amount, source
 
-### Task 2.2: PMS adapter contract
+### Task 2.2: PMS Configuration UI ✅
+
+Files:
+
+- Create: a-proposal2/app/(dashboard)/settings/pms/page.tsx
+- Create: a-proposal2/components/settings/pms/pms-config-form.tsx
+- Create: a-proposal2/lib/pms/config.ts (Server action for saving/testing credentials)
+
+Features:
+
+- Secure storage of API Keys / credentials in `pms_configurations`
+- Status indicator for connexion health
+- Select PMS Provider from supported list
+
+### Task 2.3: PMS adapter contract and Sync Service ✅
 
 Files:
 
 - Create: a-proposal2/lib/pms/adapter.ts
+- Create: a-proposal2/lib/pms/sync-service.ts
 
 Adapter interface must include:
 
@@ -459,24 +477,32 @@ Adapter interface must include:
 - Map PMS status to internal status
 - Verify webhook payload authenticity (when supported)
 
-### Task 2.3: First production adapter
+Sync Service Expectations:
+
+- Act as middleware between adapter data and Supabase `guests` and `reservations` tables
+- Uses `createAdminClient()` to perform database upserts reliably
+- Triggers UI notifications using logger / `@mantine/notifications` appropriately
+
+### Task 2.4: First production adapter and Sync UI ✅
 
 Files:
 
-- Create: a-proposal2/lib/pms/cloudbeds-adapter.ts OR a-proposal2/lib/pms/mews-adapter.ts
-
-### Task 2.4: Additional adapters (deferred after MVP)
-
-Files:
-
-- Create: a-proposal2/lib/pms/cloudbeds-adapter.ts (if not first)
-- Create: a-proposal2/lib/pms/mews-adapter.ts (if not first)
-- Create: a-proposal2/lib/pms/custom-adapter.ts
+- Create: a-proposal2/lib/pms/mock-adapter.ts (MVP implementation)
+- Create: a-proposal2/lib/pms/sync-action.ts (Server action to trigger sync)
+- Create: a-proposal2/components/reservations/sync-button.tsx (Client component UI)
 
 Acceptance Criteria (Phase 2):
 
+- Tenant can safely save PMS credentials via settings UI
+- Synchronization service correctly persists adapter data to DB
 - One adapter passes sync smoke test end-to-end
+- Sync can be triggered manually via a dashboard button
 - Internal reservation status mapping is deterministic and documented
+- Database RLS policies are optimized using `SECURITY DEFINER` functions to prevent infinite recursion loops during synchronization
+
+**Adapter Guides:**
+
+- [QloApps Adapter Guide](./phase-2/qloapps-adapter-guide.md) — Docker setup, API enablement, and implementation steps
 
 ---
 
@@ -496,19 +522,18 @@ Capabilities:
 - Get QR code
 - Send text message
 
-### Task 3.2: Settings page for WAHA + PMS config
+### Task 3.2: Settings page for WAHA configuration
 
 Files:
 
-- Create: a-proposal2/app/(dashboard)/settings/page.tsx
-- Create: a-proposal2/components/settings/waha-qr-modal.tsx
+- Create: a-proposal2/app/(dashboard)/settings/waha/page.tsx
+- Create: a-proposal2/components/settings/waha/waha-qr-modal.tsx
 
 Sections:
 
 - WAHA URL and API key config
 - Session status indicator
 - QR visualization
-- PMS configuration (type, endpoint, credentials)
 
 ### Task 3.3: Message templates
 

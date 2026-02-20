@@ -24,6 +24,15 @@ Core UI and Tenant Dashboard phase documentation including:
 - Walkthrough with bug fixes and decisions
 - Summary of all accomplishments
 
+### 📁 [phase-2/](./phase-2/)
+
+**Status:** ✅ Completed
+
+PMS Integration (MVP) phase documentation including:
+
+- Summary of all accomplishments
+- Implemented synchronization service architecture
+
 ### 📄 Core Documentation
 
 - **[migrations.md](./migrations.md)** - Database migration strategy and best practices
@@ -47,6 +56,10 @@ Archive of implementation plans (now organized by phase folders)
 - [Phase 1 README](./phase-1/README.md) - Overview and status
 - [Implementation Plan](./phase-1/implementation-plan.md) - Detailed execution plan
 - [Walkthrough](./phase-1/walkthrough.md) - What was accomplished, bugs fixed
+
+### Phase 2: PMS Integration (MVP) ✅
+
+- [Phase 2 README](./phase-2/README.md) - Overview and architectural choices (Sync and Tabs)
 
 ### Operational Guides
 

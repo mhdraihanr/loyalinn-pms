@@ -178,52 +178,50 @@ ALTER TABLE inbound_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE automation_jobs ENABLE ROW LEVEL SECURITY;
 
 -- Helper: get current user's tenant_id
--- Used in policies below
--- (Inline subquery for clarity)
+-- SECURITY DEFINER bypasses RLS on tenant_users preventing infinite recursion
+CREATE OR REPLACE FUNCTION public.get_user_tenant_id()
+RETURNS UUID
+LANGUAGE sql
+SECURITY DEFINER SET search_path = public
+STABLE
+AS $$
+  SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid() LIMIT 1;
+$$;
+
+-- Helper: check if current user is owner of the given tenant
+CREATE OR REPLACE FUNCTION public.is_tenant_owner(check_tenant_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM tenant_users 
+    WHERE user_id = auth.uid() 
+      AND tenant_id = check_tenant_id 
+      AND role = 'owner'
+  );
+$$;
 
 -- TENANTS: any member can view, only owner can update/delete
 CREATE POLICY "Members can view their tenant" ON tenants
-  FOR SELECT USING (
-    id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
-  );
+  FOR SELECT USING (id = public.get_user_tenant_id());
 
 CREATE POLICY "Owners can update their tenant" ON tenants
-  FOR UPDATE USING (
-    id IN (
-      SELECT tenant_id FROM tenant_users
-      WHERE user_id = auth.uid() AND role = 'owner'
-    )
-  );
+  FOR UPDATE USING (public.is_tenant_owner(id));
 
 -- TENANT_USERS: members can view, only owner can insert/update/delete
 CREATE POLICY "Members can view tenant members" ON tenant_users
-  FOR SELECT USING (
-    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
-  );
+  FOR SELECT USING (tenant_id = public.get_user_tenant_id());
 
 CREATE POLICY "Owners can manage tenant members" ON tenant_users
-  FOR INSERT WITH CHECK (
-    tenant_id IN (
-      SELECT tenant_id FROM tenant_users
-      WHERE user_id = auth.uid() AND role = 'owner'
-    )
-  );
+  FOR INSERT WITH CHECK (public.is_tenant_owner(tenant_id));
 
 CREATE POLICY "Owners can update tenant members" ON tenant_users
-  FOR UPDATE USING (
-    tenant_id IN (
-      SELECT tenant_id FROM tenant_users
-      WHERE user_id = auth.uid() AND role = 'owner'
-    )
-  );
+  FOR UPDATE USING (public.is_tenant_owner(tenant_id));
 
 CREATE POLICY "Owners can delete tenant members" ON tenant_users
-  FOR DELETE USING (
-    tenant_id IN (
-      SELECT tenant_id FROM tenant_users
-      WHERE user_id = auth.uid() AND role = 'owner'
-    )
-  );
+  FOR DELETE USING (public.is_tenant_owner(tenant_id));
 
 -- Allow new owner to insert themselves (during onboarding)
 CREATE POLICY "Users can join as owner during onboarding" ON tenant_users
@@ -231,55 +229,33 @@ CREATE POLICY "Users can join as owner during onboarding" ON tenant_users
 
 -- PMS CONFIGURATIONS: all members can view, only owner can manage
 CREATE POLICY "Members can view PMS config" ON pms_configurations
-  FOR SELECT USING (
-    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
-  );
+  FOR SELECT USING (tenant_id = public.get_user_tenant_id());
 
 CREATE POLICY "Owners can manage PMS config" ON pms_configurations
-  FOR ALL USING (
-    tenant_id IN (
-      SELECT tenant_id FROM tenant_users
-      WHERE user_id = auth.uid() AND role = 'owner'
-    )
-  );
+  FOR ALL USING (public.is_tenant_owner(tenant_id));
 
 -- WAHA CONFIGURATIONS: all members can view, only owner can manage
 CREATE POLICY "Members can view WAHA config" ON waha_configurations
-  FOR SELECT USING (
-    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
-  );
+  FOR SELECT USING (tenant_id = public.get_user_tenant_id());
 
 CREATE POLICY "Owners can manage WAHA config" ON waha_configurations
-  FOR ALL USING (
-    tenant_id IN (
-      SELECT tenant_id FROM tenant_users
-      WHERE user_id = auth.uid() AND role = 'owner'
-    )
-  );
+  FOR ALL USING (public.is_tenant_owner(tenant_id));
 
 -- GUESTS: all members can manage
 CREATE POLICY "Members can manage guests" ON guests
-  FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
-  );
+  FOR ALL USING (tenant_id = public.get_user_tenant_id());
 
 -- RESERVATIONS: all members can manage
 CREATE POLICY "Members can manage reservations" ON reservations
-  FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
-  );
+  FOR ALL USING (tenant_id = public.get_user_tenant_id());
 
 -- MESSAGE TEMPLATES: all members can manage
 CREATE POLICY "Members can manage templates" ON message_templates
-  FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
-  );
+  FOR ALL USING (tenant_id = public.get_user_tenant_id());
 
 -- MESSAGE LOGS: all members can view
 CREATE POLICY "Members can view message logs" ON message_logs
-  FOR SELECT USING (
-    tenant_id IN (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid())
-  );
+  FOR SELECT USING (tenant_id = public.get_user_tenant_id());
 
 -- INBOUND EVENTS: service role only (webhooks)
 CREATE POLICY "Service role manages inbound events" ON inbound_events

@@ -39,12 +39,7 @@ ALTER TABLE invitations ENABLE ROW LEVEL SECURITY;
 
 -- Owners can view, create, and delete invitations for their own tenant
 CREATE POLICY "Owners can manage invitations" ON invitations
-  FOR ALL USING (
-    tenant_id IN (
-      SELECT tenant_id FROM tenant_users
-      WHERE user_id = auth.uid() AND role = 'owner'
-    )
-  );
+  FOR ALL USING (public.is_tenant_owner(tenant_id));
 
 -- NOTE: Token lookup for /accept-invite is done via admin client (service role).
 -- No public SELECT policy is intentional — prevents enumeration of invited emails.
