@@ -74,6 +74,7 @@ export function PmsConfigForm({
               data={[
                 { value: "cloudbeds", label: "Cloudbeds" },
                 { value: "mews", label: "Mews" },
+                { value: "qloapps", label: "QloApps" },
                 { value: "custom", label: "Custom / Generic" },
               ]}
               defaultValue={defaultPms}

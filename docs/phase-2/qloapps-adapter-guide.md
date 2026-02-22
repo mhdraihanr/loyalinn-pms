@@ -101,14 +101,14 @@ If you need to modify QloApps source code (e.g., add custom modules or API endpo
 
 ```dockerfile
 # QloApps/Dockerfile
-FROM php:8.1-apache
+FROM php:7.4-apache
 
-# Install required PHP extensions
+# Install required PHP extensions (QloApps historically requires PHP <= 7.4)
 RUN apt-get update && apt-get install -y \
     libpng-dev libjpeg-dev libfreetype6-dev libxml2-dev libzip-dev libcurl4-openssl-dev \
     default-mysql-client unzip git \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install pdo_mysql gd curl soap zip simplexml dom
+    && docker-php-ext-install pdo_mysql mysqli gd curl soap zip simplexml dom
 
 # Enable Apache mod_rewrite
 RUN a2enmod rewrite
@@ -196,8 +196,10 @@ docker ps
 4. **Important — Remove the install directory:**
 
 ```bash
-docker exec -i qloapps-dev rm -rf /home/qloapps/www/hotelcommerce/install
+docker exec -i qloapps-dev rm -rf /home/qloapps/www/QloApps/install
 ```
+
+docker exec -i qloapps-dev mv /home/qloapps/www/QloApps/admin /home/qloapps/www/QloApps/admin008xrilbs
 
 5. Access the Back Office (Admin Panel) at:
    `http://localhost:8080/<admin-directory-name>/`
@@ -216,16 +218,17 @@ The Webservice API is how our app communicates with QloApps. It must be enabled 
    - **Key:** Click "Generate" to create a secure key (e.g., `ABCDEFGHIJ1234567890KLMNOPQRST01`)
    - **Key Description:** `a-proposal2 integration`
    - **Status:** Enabled
-   - **Permissions:** Grant at minimum:
-     - `bookings` — GET (Read)
-     - `customers` — GET (Read)
-     - `addresses` — GET (Read)
-     - `hotel_booking_detail` — GET (Read)
+   - **Permissions:** Grant at minimum GET (Read) access to:
+     - `room_bookings`
+     - `orders`
+     - `customers`
+     - `addresses`
+     - `countries`
 4. Save.
 
 > ⚠️ **Copy and securely save this API Key.** You will enter it into our PMS Config UI (`/settings/pms`).
 
----
+## CL9UMY7EJW5D51VCTVQQV2UHJ2GV88FG
 
 ## 6. API Endpoints Reference
 
@@ -239,38 +242,48 @@ Authentication uses the API Key as the HTTP Basic Auth **username** (password is
 
 ### Key Resources
 
-| Resource                | Endpoint                        | Description                      |
-| ----------------------- | ------------------------------- | -------------------------------- |
-| Bookings (Reservations) | `GET /api/bookings`             | List all bookings                |
-| Single Booking          | `GET /api/bookings/{id}`        | Get specific booking details     |
-| Customers (Guests)      | `GET /api/customers`            | List all customers               |
-| Single Customer         | `GET /api/customers/{id}`       | Get specific customer details    |
-| Hotel Booking Detail    | `GET /api/hotel_booking_detail` | Room assignment and date details |
-| Addresses               | `GET /api/addresses`            | Customer address/country info    |
+| Resource            | Endpoint                      | Description                       |
+| ------------------- | ----------------------------- | --------------------------------- |
+| Room Bookings       | `GET /api/room_bookings`      | List all room reservation states  |
+| Single Room Booking | `GET /api/room_bookings/{id}` | Get specific room check-in status |
+| Orders              | `GET /api/orders`             | Parent order / financial state    |
+| Customers (Guests)  | `GET /api/customers`          | List all customers                |
+| Addresses           | `GET /api/addresses`          | Customer address/country info     |
+| Countries           | `GET /api/countries/{id}`     | Resolves `id_country` to text     |
 
 ### Example cURL
 
 ```bash
-# List all bookings (JSON)
-curl -u "YOUR_API_KEY:" "http://localhost:8080/api/bookings?output_format=JSON"
+# List all room bookings (JSON)
+curl -u "YOUR_API_KEY:" "http://localhost:8080/api/room_bookings?output_format=JSON"
 
-# Get specific booking
-curl -u "YOUR_API_KEY:" "http://localhost:8080/api/bookings/1?output_format=JSON"
+# Get specific room booking status and room number
+curl -u "YOUR_API_KEY:" "http://localhost:8080/api/room_bookings/1?output_format=JSON"
 
 # Get customer details
 curl -u "YOUR_API_KEY:" "http://localhost:8080/api/customers/1?output_format=JSON&display=full"
 ```
 
-### QloApps Booking Statuses → Internal Status Mapping
+### QloApps Room Bookings `id_status` → Internal Status Mapping
 
-| QloApps Status ID | QloApps Meaning       | Our Internal Status |
-| ----------------- | --------------------- | ------------------- |
-| `1`               | Awaiting Check-in     | `pre-arrival`       |
-| `2`               | Checked In / In House | `on-stay`           |
-| `3`               | Checked Out           | `checked-out`       |
-| `6`               | Canceled              | `cancelled`         |
+The `/api/room_bookings` endpoint exposes an `id_status` field that tracks the _exact state of the physical room check-in_:
 
-> ⚠️ **Note:** QloApps uses numeric order state IDs inherited from PrestaShop. The exact IDs may vary based on your installation. Verify via `GET /api/order_states?output_format=JSON` after setup.
+| QloApps `id_status` | QloApps Meaning       | Our Internal Status |
+| ------------------- | --------------------- | ------------------- |
+| `1`                 | Awaiting Check-in     | `pre-arrival`       |
+| `2`                 | Checked In / In House | `on-stay`           |
+| `3`                 | Checked Out           | `checked-out`       |
+| `4` / `6`           | Canceled / Invalid    | `cancelled`         |
+
+### Actual Check-In Time Handling
+
+Unlike the `/api/bookings` endpoint, the **`/api/room_bookings`** JSON object contains an explicit timestamp for physical check-in and check-out.
+
+- `check_in`: The exact `datetime` the front desk marked the guest as Checked In.
+- `check_out`: The exact `datetime` the front desk marked the guest as Checked Out.
+- `room_num`: The actual string identifier of the room (e.g., "LR-101").
+
+Our Sync Adapter will parse the `room_bookings` to get the `check_in` time and `room_num` accurately.
 
 ---
 
@@ -283,9 +296,10 @@ A QloApps adapter must conform to the `PMSAdapter` interface in `lib/pms/adapter
 The adapter will:
 
 1. **`init(credentials, endpoint)`** — Store the API Key and the base URL (e.g., `http://localhost:8080`)
-2. **`pullReservations(startDate, endDate)`** — Fetch from `/api/bookings?output_format=JSON&filter[date_from]=[startDate,endDate]&display=full`, then for each booking fetch the `hotel_booking_detail` to get room number and dates.
-3. **`pullGuest(pmsGuestId)`** — Fetch from `/api/customers/{id}?output_format=JSON&display=full` and map `firstname`, `lastname`, `email`, etc. to `AdapterGuest`.
-4. **`mapStatus(pmsStatus)`** — Map QloApps numeric order state IDs to internal statuses using the table above.
+2. **`pullReservations(startDate, endDate)`** — Fetch from `/api/room_bookings?output_format=JSON&display=full`. Note: Native PrestaShop date ranges break the QloApps room array structure. Therefore, the adapter must fetch the full list, extract the JSON object natively via `data.bookings` (NOT `data.room_bookings`), and use native Typescript `.filter()` logic to check if `roomIn <= endDate` and `roomOut >= startDate` to ensure check-in/check-out overlap. Map `room_num`, `id_status`, `check_in`, and `country` directly.
+3. **`pullOrders(orderId)`** — For each `id_order` in `room_bookings`, fetch `/api/orders/{id_order}?output_format=JSON` to map the **total booking price** (`total_paid_tax_incl`) and `source`. **Crucially**, we also check `current_state`. If the parent order's `current_state` is not `2` ("Payment accepted"), we skip the room booking entirely.
+4. **`pullGuest(pmsGuestId)`** — Fetch from `/api/customers/{id}?output_format=JSON` (do **NOT** use `display=full` here or the API will strip the data and wrap it in a list) to get identity/phone from `data.customer`. Then, fetch `/api/addresses` to get the `id_country`, and fetch `/api/countries/{id_country}` to map a human-readable `country` string to `AdapterGuest`.
+5. **`mapStatus(pmsStatus)`** — Map QloApps `id_status` to internal statuses using the table above.
 
 ### How Authentication Works
 
@@ -299,11 +313,14 @@ headers.set("Authorization", "Basic " + btoa(apiKey + ":"));
 Or equivalently with `fetch`:
 
 ```typescript
-const response = await fetch(`${endpoint}/api/bookings?output_format=JSON`, {
-  headers: {
-    Authorization: `Basic ${Buffer.from(apiKey + ":").toString("base64")}`,
+const response = await fetch(
+  `${endpoint}/api/room_bookings?output_format=JSON`,
+  {
+    headers: {
+      Authorization: `Basic ${Buffer.from(apiKey + ":").toString("base64")}`,
+    },
   },
-});
+);
 ```
 
 ---
@@ -342,22 +359,55 @@ ALTER TABLE pms_configurations
 
 ### Step 3: Update the Sync Action Adapter Factory
 
-In `lib/pms/sync-action.ts`, add adapter selection logic:
+In `lib/pms/sync-action.ts`, update the adapter selection logic inside `triggerManualSync()`:
 
 ```typescript
 import { QloAppsAdapter } from "./qloapps-adapter";
+import { MockAdapter } from "./mock-adapter";
+import { PMSAdapter } from "./adapter";
 
-// Inside triggerManualSync():
-let adapter;
+// Inside triggerManualSync(), replace the hardcoded MockAdapter initialization:
+let adapter: PMSAdapter;
 if (config.pms_type === "qloapps") {
   adapter = new QloAppsAdapter();
 } else {
-  adapter = new MockAdapter(); // fallback
+  adapter = new MockAdapter(); // fallback for other types
 }
 adapter.init(config.credentials, config.endpoint);
+
+// Sync from 7 days ago to 7 days in the future
+// to capture ongoing stays that checked in before today.
+const today = new Date();
+const lastWeek = new Date(today);
+lastWeek.setDate(today.getDate() - 7);
+
+const nextWeek = new Date(today);
+nextWeek.setDate(today.getDate() + 7);
+
+const startDate = lastWeek.toISOString().split("T")[0];
+const endDate = nextWeek.toISOString().split("T")[0];
+
+const result = await syncReservations(
+  adminCheck.tenantId, // Passed securely from requireOwner()
+  adapter,
+  startDate,
+  endDate,
+);
 ```
 
-### Step 4: Enter Credentials in the UI
+> **Note on RLS**: Thanks to the recent Phase 2 RLS fix (`20260220000000_fix_rls_recursion.sql`), the background worker logic in `syncReservations` bypasses RLS using `createAdminClient`, allowing seamless upserts for the `tenantId`.
+
+### Step 4: Update the Server Action Validation
+
+In `lib/pms/config.ts`, you must explicitly add `'qloapps'` to the allowed `pmsType` array so the server accepts the form submission:
+
+```typescript
+if (!["cloudbeds", "mews", "qloapps", "custom"].includes(pmsType)) {
+  return { error: "Invalid PMS Type" };
+}
+```
+
+### Step 5: Enter Credentials in the UI
 
 | Field                    | Value                                 |
 | ------------------------ | ------------------------------------- |
@@ -374,7 +424,9 @@ After saving, clicking **"Sync PMS"** on the Reservations page will pull data fr
 | Action     | File                                          | Description                                  |
 | ---------- | --------------------------------------------- | -------------------------------------------- |
 | **CREATE** | `lib/pms/qloapps-adapter.ts`                  | QloApps adapter implementing `PMSAdapter`    |
+| **CREATE** | `lib/pms/registry.ts`                         | Dynamic registry to load `QloAppsAdapter`    |
 | **MODIFY** | `components/settings/pms/pms-config-form.tsx` | Add "qloapps" to provider dropdown           |
-| **MODIFY** | `lib/pms/sync-action.ts`                      | Add adapter factory logic for "qloapps"      |
+| **MODIFY** | `lib/pms/sync-action.ts`                      | Use dynamic registry initialization          |
+| **MODIFY** | `lib/pms/config.ts`                           | Allow "qloapps" in Server Action validation  |
 | **CREATE** | `supabase/migrations/XXXX_add_qloapps.sql`    | Add `'qloapps'` to pms_type CHECK constraint |
 | **MODIFY** | `.env.local.example`                          | _(Optional)_ Add `QLOAPPS_BASE_URL` note     |

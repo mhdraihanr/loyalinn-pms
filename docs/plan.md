@@ -17,6 +17,7 @@ Build a Next.js web app that integrates with hotel PMS systems to sync reservati
 - Supabase (Postgres, Auth, Realtime)
 - WAHA (self-hosted WhatsApp HTTP API)
 - Tailwind CSS + shadcn/ui
+- Mantine Core (Note: Use standard components like `TableThead` over compound components like `Table.Thead` inside Next.js Server Components to prevent 'Element type is invalid' rendering errors).
 
 ---
 
@@ -169,6 +170,7 @@ Files:
 Files:
 
 - Create/Modify: a-proposal2/app/(dashboard)/page.tsx
+- Create: a-proposal2/components/dashboard/recent-reservations.tsx (Client component for Mantine Table)
 - Create: a-proposal2/lib/data/dashboard.ts
 
 Features:

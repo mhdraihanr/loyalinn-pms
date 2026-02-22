@@ -42,7 +42,7 @@ export async function savePmsConfig(formData: FormData) {
     return { error: "All fields are required" };
   }
 
-  if (!["cloudbeds", "mews", "custom"].includes(pmsType)) {
+  if (!["cloudbeds", "mews", "qloapps", "custom"].includes(pmsType)) {
     return { error: "Invalid PMS Type" };
   }
 

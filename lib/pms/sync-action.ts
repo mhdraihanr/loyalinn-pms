@@ -17,15 +17,20 @@ export async function triggerManualSync() {
       return { error: "PMS Sync is not configured or is inactive." };
     }
 
-    const adapter = new MockAdapter();
+    const { getPMSAdapter } = await import("./registry");
+    const adapter = getPMSAdapter(config.pms_type);
     adapter.init(config.credentials, config.endpoint);
 
-    // Sync for the current week as a demonstration
+    // Sync from 7 days ago to 7 days in the future
+    // to capture ongoing stays that checked in before today.
     const today = new Date();
+    const lastWeek = new Date(today);
+    lastWeek.setDate(today.getDate() - 7);
+
     const nextWeek = new Date(today);
     nextWeek.setDate(today.getDate() + 7);
 
-    const startDate = today.toISOString().split("T")[0];
+    const startDate = lastWeek.toISOString().split("T")[0];
     const endDate = nextWeek.toISOString().split("T")[0];
 
     const result = await syncReservations(

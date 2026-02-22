@@ -8,25 +8,15 @@ import {
   Title,
   Stack,
   Group,
-  Badge,
-  Table,
-  Box,
   ThemeIcon,
 } from "@mantine/core";
 import {
   IconUsers,
   IconCalendarCheck,
   IconMessage,
-  IconBuildingSkyscraper,
+  IconBuilding,
 } from "@tabler/icons-react";
-
-const statusColors: Record<string, string> = {
-  confirmed: "blue",
-  checked_in: "green",
-  checked_out: "gray",
-  cancelled: "red",
-  no_show: "orange",
-};
+import { RecentReservationsTable } from "@/components/dashboard/recent-reservations";
 
 export default async function DashboardPage() {
   const userTenant = await getCurrentUserTenant();
@@ -61,7 +51,7 @@ export default async function DashboardPage() {
     {
       label: "Tenant",
       value: "Active",
-      icon: IconBuildingSkyscraper,
+      icon: IconBuilding,
       color: "teal",
     },
   ];
@@ -101,44 +91,7 @@ export default async function DashboardPage() {
         <Title order={4} mb="md">
           Recent Reservations
         </Title>
-        {reservations.length === 0 ? (
-          <Box py="xl" ta="center">
-            <Text c="dimmed" size="sm">
-              No reservations yet. Connect a PMS to start syncing data.
-            </Text>
-          </Box>
-        ) : (
-          <Table highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Guest</Table.Th>
-                <Table.Th>Room</Table.Th>
-                <Table.Th>Check-in</Table.Th>
-                <Table.Th>Check-out</Table.Th>
-                <Table.Th>Status</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {reservations.map((r) => (
-                <Table.Tr key={r.id}>
-                  <Table.Td>{r.guest_name ?? "—"}</Table.Td>
-                  <Table.Td>{r.room_number ?? "—"}</Table.Td>
-                  <Table.Td>{r.check_in_date ?? "—"}</Table.Td>
-                  <Table.Td>{r.check_out_date ?? "—"}</Table.Td>
-                  <Table.Td>
-                    <Badge
-                      color={statusColors[r.status] ?? "gray"}
-                      radius="sm"
-                      variant="light"
-                    >
-                      {r.status}
-                    </Badge>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        )}
+        <RecentReservationsTable reservations={reservations} />
       </Card>
     </Stack>
   );

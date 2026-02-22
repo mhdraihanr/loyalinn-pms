@@ -1,0 +1,78 @@
+{
+  "booking": {
+    "id": 1,
+    "id_property": 1,
+    "currency": "IDR",
+    "source": "localhost:8080",
+    "booking_date": "2026-02-20 10:41:21",
+    "id_language": 1,
+    "associations": {
+      "customer_detail": {
+        "id_customer": 1,
+        "firstname": "John",
+        "lastname": "Doe",
+        "email": "pub@qloapps.com",
+        "phone": "1234567890"
+      },
+      "price_details": {
+        "total_paid": 3685,
+        "total_price_without_tax": 3350,
+        "total_tax": 335
+      },
+      "cart_rules": [],
+      "remarks": ["Manual order -- Employee: M. Rafliansyah"],
+      "room_types": [
+        {
+          "id_room_type": 4,
+          "checkin_date": "2026-02-20 00:00:00",
+          "checkout_date": "2026-02-21 00:00:00",
+          "total_tax": 250,
+          "number_of_rooms": 1,
+          "name": "Luxury Rooms",
+          "rooms": [
+            {
+              "id_room": 16,
+              "id_hotel_booking": 1,
+              "adults": 2,
+              "child": 0,
+              "unit_price_without_tax": 2500,
+              "total_tax": 250,
+              "services": [
+                {
+                  "id_service": 5,
+                  "name": "Room Maintenance Fees",
+                  "quantity": 1,
+                  "unit_price_without_tax": 250,
+                  "total_price_without_tax": 250,
+                  "total_tax": 25,
+                  "per_night": 1,
+                  "price_mode": 2
+                },
+                {
+                  "id_service": 6,
+                  "name": "Internet Handling Charges",
+                  "quantity": 1,
+                  "unit_price_without_tax": 250,
+                  "total_price_without_tax": 250,
+                  "total_tax": 25,
+                  "per_night": 0,
+                  "price_mode": 1
+                },
+                {
+                  "id_service": 9,
+                  "name": "Breakfast",
+                  "quantity": 1,
+                  "unit_price_without_tax": 350,
+                  "total_price_without_tax": 350,
+                  "total_tax": 35,
+                  "per_night": 1,
+                  "price_mode": 2
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
