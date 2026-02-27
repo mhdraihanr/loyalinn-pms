@@ -533,9 +533,10 @@ Files:
 
 Sections:
 
-- WAHA URL and API key config
-- Session status indicator
-- QR visualization
+- Session status indicator (Checking if tenant session exists on global WAHA server)
+- QR visualization (Generates/Starts session for `tenant_id` if disconnected)
+- Disconnect / Logout Session
+- _Note: WAHA URL and API Key are managed globally via `.env` (no longer required per tenant)._
 
 ### Task 3.3: Message templates
 

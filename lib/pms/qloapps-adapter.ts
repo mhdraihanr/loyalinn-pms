@@ -47,8 +47,12 @@ export class QloAppsAdapter implements PMSAdapter {
     // Filter in-memory to ensure the reservation overlaps with our requested date range.
     // We check if the room's check_in date is before our endDate
     // AND check_out date is after our startDate.
-    const startRange = new Date(startDate).getTime();
-    const endRange = new Date(endDate).getTime();
+    // To avoid timezone offsets (where "2026-02-22" locally becomes "2026-02-21 17:00:00Z"
+    // and causes valid reservations to be dropped), we compare the strict YYYY-MM-DD string values.
+
+    // YYYY-MM-DD
+    const startRangeStr = startDate.split("T")[0];
+    const endRangeStr = endDate.split("T")[0];
 
     rooms = rooms.filter((room: any) => {
       const roomCheckInStr =
@@ -60,10 +64,12 @@ export class QloAppsAdapter implements PMSAdapter {
           ? room.check_out
           : room.date_to;
 
-      const roomIn = new Date(roomCheckInStr.split(" ")[0]).getTime();
-      const roomOut = new Date(roomCheckOutStr.split(" ")[0]).getTime();
+      // Extract just the YYYY-MM-DD part from QloApps "YYYY-MM-DD HH:MM:SS"
+      const roomInStr = roomCheckInStr.split(" ")[0];
+      const roomOutStr = roomCheckOutStr.split(" ")[0];
 
-      return roomIn <= endRange && roomOut >= startRange;
+      // Lexicographical string comparison is safe for YYYY-MM-DD
+      return roomInStr <= endRangeStr && roomOutStr >= startRangeStr;
     });
 
     for (const room of rooms) {
@@ -118,7 +124,7 @@ export class QloAppsAdapter implements PMSAdapter {
         room_number: room.room_num,
         check_in_date: checkInDate,
         check_out_date: checkOutDate,
-        pms_status: this.mapStatus(room.id_status.toString()),
+        pms_status: room.id_status.toString(),
         amount: amount,
         source: source,
         // Country is optionally handled based on our mapping,
