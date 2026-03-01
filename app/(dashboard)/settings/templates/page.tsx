@@ -6,17 +6,17 @@ import { redirect } from "next/navigation";
 import { TemplateVariant } from "@/components/settings/template-form";
 
 export default async function TemplatesPage() {
-  const { tenant } = await getCurrentUserTenant();
-  if (!tenant) redirect("/login");
+  const userTenant = await getCurrentUserTenant();
+  if (!userTenant) redirect("/login");
 
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const { data: templates } = await supabase
     .from("message_templates")
     .select(
       "id, trigger, message_template_variants(id, language_code, content)",
     )
-    .eq("tenant_id", tenant.id);
+    .eq("tenant_id", userTenant.tenantId);
 
   const getVariantsForTrigger = (trigger: string): TemplateVariant[] => {
     // Note: Due to the UNIQUE trigger_event, we just find the first match
@@ -36,9 +36,9 @@ export default async function TemplatesPage() {
   ) {
     "use server";
 
-    const { tenant } = await getCurrentUserTenant();
-    if (!tenant) throw new Error("Unauthorized");
-    const supabaseServer = createClient();
+    const userTenant = await getCurrentUserTenant();
+    if (!userTenant) throw new Error("Unauthorized");
+    const supabaseServer = await createClient();
 
     // Upsert template
     // Note: The schema for message_templates uses 'trigger' not 'trigger_event' (which I mistakenly wrote in the DB schema file? wait.)
@@ -50,7 +50,7 @@ export default async function TemplatesPage() {
       .from("message_templates")
       .upsert(
         {
-          tenant_id: tenant.id,
+          tenant_id: userTenant.tenantId,
           trigger: triggerEvent,
           name: triggerEvent + " Template", // 'name' was NOT null in original schema
         },

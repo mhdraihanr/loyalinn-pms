@@ -3,11 +3,13 @@ import { wahaClient } from "@/lib/waha/client";
 import { getCurrentUserTenant } from "@/lib/auth/tenant";
 
 export async function GET() {
-  const { tenant } = await getCurrentUserTenant();
-  if (!tenant)
+  const userTenant = await getCurrentUserTenant();
+  if (!userTenant)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const sessionId = tenant.id; // UUID as session name
+  // WAHA Core free version only supports 1 session, typically named "default"
+  // In a multi-tenant paid setup, this would be userTenant.tenantId
+  const sessionId = "default";
   try {
     const sessions = await wahaClient.getSessions();
     const session = sessions.find((s: any) => s.name === sessionId);

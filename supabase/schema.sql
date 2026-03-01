@@ -92,9 +92,44 @@ CREATE TABLE reservations (
   status TEXT NOT NULL CHECK (status IN ('pre-arrival', 'on-stay', 'checked-out', 'cancelled')),
   amount DECIMAL(10, 2),
   source TEXT,
+  post_stay_feedback_status TEXT DEFAULT 'not-sent' CHECK (post_stay_feedback_status IN ('not-sent', 'pending', 'completed')),
+  post_stay_rating INTEGER CHECK (post_stay_rating >= 1 AND post_stay_rating <= 5),
+  post_stay_comments TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(tenant_id, pms_reservation_id)
+);
+
+-- ============================================================
+-- ROOM SERVICE ORDERS
+-- ============================================================
+CREATE TABLE room_service_orders (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+  guest_id UUID NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+  room_number TEXT NOT NULL,
+  items JSONB NOT NULL,
+  total_amount DECIMAL(10, 2),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'preparing', 'delivered', 'cancelled')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- HOUSEKEEPING REQUESTS
+-- ============================================================
+CREATE TABLE housekeeping_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+  guest_id UUID NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+  room_number TEXT NOT NULL,
+  request_type TEXT NOT NULL CHECK (request_type IN ('cleaning', 'extra_items', 'maintenance', 'other')),
+  details JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in-progress', 'completed', 'cancelled')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================
@@ -172,6 +207,8 @@ ALTER TABLE pms_configurations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE waha_configurations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reservations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE room_service_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE housekeeping_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbound_events ENABLE ROW LEVEL SECURITY;
@@ -249,6 +286,14 @@ CREATE POLICY "Members can manage guests" ON guests
 CREATE POLICY "Members can manage reservations" ON reservations
   FOR ALL USING (tenant_id = public.get_user_tenant_id());
 
+-- ROOM SERVICE ORDERS: all members can manage
+CREATE POLICY "Members can manage room service orders" ON room_service_orders
+  FOR ALL USING (tenant_id = public.get_user_tenant_id());
+
+-- HOUSEKEEPING REQUESTS: all members can manage
+CREATE POLICY "Members can manage housekeeping requests" ON housekeeping_requests
+  FOR ALL USING (tenant_id = public.get_user_tenant_id());
+
 -- MESSAGE TEMPLATES: all members can manage
 CREATE POLICY "Members can manage templates" ON message_templates
   FOR ALL USING (tenant_id = public.get_user_tenant_id());
@@ -273,6 +318,10 @@ CREATE INDEX idx_tenant_users_tenant_id ON tenant_users(tenant_id);
 CREATE INDEX idx_guests_tenant_id ON guests(tenant_id);
 CREATE INDEX idx_reservations_tenant_id ON reservations(tenant_id);
 CREATE INDEX idx_reservations_status ON reservations(status);
+CREATE INDEX idx_room_service_tenant_id ON room_service_orders(tenant_id);
+CREATE INDEX idx_room_service_status ON room_service_orders(status);
+CREATE INDEX idx_housekeeping_tenant_id ON housekeeping_requests(tenant_id);
+CREATE INDEX idx_housekeeping_status ON housekeeping_requests(status);
 CREATE INDEX idx_message_logs_tenant_id ON message_logs(tenant_id);
 CREATE INDEX idx_inbound_events_event_id ON inbound_events(event_id);
 CREATE INDEX idx_automation_jobs_status ON automation_jobs(status);

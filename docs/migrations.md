@@ -77,3 +77,8 @@ For high-risk migrations (data transformations, column drops):
 - [ ] RLS policies updated (if needed)
 - [ ] Indexes added for new columns
 - [ ] Team notified of schema changes
+
+## Pending Migrations (To Be Applied)
+
+- `20240320000000_add_post_stay_feedback.sql`: Adds post-stay feedback columns to the reservations table.
+- `20240320000001_add_on_stay_requests.sql`: Creates `room_service_orders` and `housekeeping_requests` tables for On-Stay AI Agent features.

@@ -34,6 +34,13 @@ const navItems = [
   },
   { href: "/settings", label: "Settings", icon: IconSettings },
   { href: "/settings/pms", label: "PMS Config", icon: IconSettings },
+  { href: "/settings/waha", label: "WhatsApp Connect", icon: IconSettings },
+  {
+    href: "/settings/templates",
+    label: "Message Templates",
+    icon: IconSettings,
+  },
+  { href: "/settings/team", label: "Team Management", icon: IconUsers },
 ];
 
 export function Sidebar({ hotelName }: { hotelName: string }) {

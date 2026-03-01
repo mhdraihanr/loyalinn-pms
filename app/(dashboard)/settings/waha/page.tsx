@@ -165,7 +165,10 @@ export default function WahaSettingsPage() {
           {phoneInfo && (
             <div className="bg-gray-50 p-3 rounded-md border text-sm mt-2">
               <Text fw={500}>
-                Connected Number: +{phoneInfo.user?.split(":")[0] || "Unknown"}
+                Connected Number: +
+                {phoneInfo.user?.split(":")[0] ||
+                  phoneInfo.id?.split("@")[0] ||
+                  "Unknown"}
               </Text>
             </div>
           )}
@@ -200,8 +203,12 @@ export default function WahaSettingsPage() {
               <Button
                 color="green"
                 onClick={handleConnect}
-                loading={isActionLoading || status === "LOADING"}
+                loading={isActionLoading}
               >
+                Connect WhatsApp
+              </Button>
+            ) : status === "LOADING" ? (
+              <Button color="green" loading={true}>
                 Connect WhatsApp
               </Button>
             ) : null}

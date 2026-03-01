@@ -154,3 +154,114 @@ export async function acceptStaffInvitation(
 
   if (updateError) throw updateError;
 }
+
+// ─── Team Management ─────────────────────────────────────────────────────────
+
+export async function resendInvitation(
+  ownerId: string,
+  invitationId: string,
+): Promise<void> {
+  const admin = createAdminClient();
+  const supabase = await createClient();
+
+  const { data: owner } = await supabase
+    .from("tenant_users")
+    .select("tenant_id, role")
+    .eq("user_id", ownerId)
+    .single();
+
+  if (!owner || owner.role !== "owner") throw new Error("Unauthorized");
+
+  const { data: invitation, error: fetchError } = await admin
+    .from("invitations")
+    .select("*")
+    .eq("id", invitationId)
+    .eq("tenant_id", owner.tenant_id)
+    .single();
+
+  if (fetchError || !invitation) throw new Error("Invitation not found");
+
+  // Updating the token triggers the default uuid_generate_v4() ? No, we need to ask Postgres to generate one
+  // or we can generate a UUID in TS. We'll let Postgres do it by using raw sql?
+  // We can't easily call uuid_generate_v4() from supabase client select normally.
+  // We'll generate a random UUID using crypto.
+  const newToken = crypto.randomUUID();
+
+  // Reset expires_at to +7 days
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7);
+
+  const { error: updateError } = await admin
+    .from("invitations")
+    .update({
+      token: newToken,
+      expires_at: expiresAt.toISOString(),
+      status: "pending",
+    })
+    .eq("id", invitationId);
+
+  if (updateError) throw updateError;
+
+  // Resend email
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const { error: emailError } = await admin.auth.admin.inviteUserByEmail(
+    invitation.invited_email,
+    { redirectTo: `${appUrl}/accept-invite?token=${newToken}` },
+  );
+
+  if (emailError) throw emailError;
+}
+
+export async function revokeInvitation(
+  ownerId: string,
+  invitationId: string,
+): Promise<void> {
+  const admin = createAdminClient();
+  const supabase = await createClient();
+
+  const { data: owner } = await supabase
+    .from("tenant_users")
+    .select("tenant_id, role")
+    .eq("user_id", ownerId)
+    .single();
+
+  if (!owner || owner.role !== "owner") throw new Error("Unauthorized");
+
+  const { error } = await admin
+    .from("invitations")
+    .update({ status: "expired" })
+    .eq("id", invitationId)
+    .eq("tenant_id", owner.tenant_id);
+
+  if (error) throw error;
+}
+
+export async function removeStaffMember(
+  ownerId: string,
+  targetUserId: string,
+): Promise<void> {
+  const admin = createAdminClient();
+  const supabase = await createClient();
+
+  if (ownerId === targetUserId) {
+    throw new Error("You cannot remove yourself.");
+  }
+
+  const { data: owner } = await supabase
+    .from("tenant_users")
+    .select("tenant_id, role")
+    .eq("user_id", ownerId)
+    .single();
+
+  if (!owner || owner.role !== "owner") throw new Error("Unauthorized");
+
+  // Delete from tenant_users where role is staff and tenant_id matches
+  const { error } = await admin
+    .from("tenant_users")
+    .delete()
+    .eq("user_id", targetUserId)
+    .eq("tenant_id", owner.tenant_id)
+    .eq("role", "staff");
+
+  if (error) throw error;
+}

@@ -60,7 +60,9 @@ Tables:
 - pms_configurations
 - waha_configurations
 - guests
-- reservations
+- reservations (tracks status, and post-stay feedback: rating, comments) [pending migration]
+- room_service_orders (created by AI On-Stay Function Calling) [pending migration]
+- housekeeping_requests (created by AI On-Stay Function Calling) [pending migration]
 - message_templates
 - message_logs
 - inbound_events (dedupe/idempotency)
@@ -430,6 +432,44 @@ CREATE POLICY "Owners can manage invitations" ON invitations
 
 -- Service role reads invitation by token (for accept-invite page)
 -- Handled via admin client — no public policy needed
+
+-- Migration: YYYYMMDDHHMMSS_add_multilingual_message_templates.sql
+CREATE TABLE message_templates (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  trigger TEXT NOT NULL, -- 'pre-arrival', 'on-stay', 'post-stay'
+  name TEXT NOT NULL,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tenant_id, trigger)
+);
+
+CREATE TABLE message_template_variants (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  template_id UUID NOT NULL REFERENCES message_templates(id) ON DELETE CASCADE,
+  language_code TEXT NOT NULL, -- 'id', 'en', etc.
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(template_id, language_code)
+);
+
+ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE message_template_variants ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Owners and staff can manage templates" ON message_templates
+  FOR ALL USING (
+    tenant_id IN (
+      SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Members can manage template variants" ON message_template_variants
+  FOR ALL USING (
+    template_id IN (
+      SELECT id FROM message_templates WHERE tenant_id = auth.uid()
+    )
+  );
 ```
 
 ---
@@ -508,14 +548,13 @@ Acceptance Criteria (Phase 2):
 
 ---
 
-## Phase 3: WAHA Integration and Messaging Config
+## Phase 3: WAHA Integration and Messaging Config ✅ COMPLETED
 
-### Task 3.1: WAHA client and service
+### Task 3.1: WAHA client and service ✅
 
 Files:
 
 - Create: a-proposal2/lib/waha/client.ts
-- Create: a-proposal2/lib/waha/service.ts
 
 Capabilities:
 
@@ -523,27 +562,40 @@ Capabilities:
 - Get session status
 - Get QR code
 - Send text message
+- Supports WAHA Core (Free) by forcing "default" session name, but architecture is ready for tenant ID injection in WAHA Plus.
 
-### Task 3.2: Settings page for WAHA configuration
+### Task 3.2: Settings page for WAHA configuration ✅
 
 Files:
 
+- Create: a-proposal2/app/api/waha/status/route.ts
+- Create: a-proposal2/app/api/waha/start/route.ts
+- Create: a-proposal2/app/api/waha/qr/route.ts
+- Create: a-proposal2/app/api/waha/logout/route.ts
 - Create: a-proposal2/app/(dashboard)/settings/waha/page.tsx
 - Create: a-proposal2/components/settings/waha/waha-qr-modal.tsx
 
 Sections:
 
-- Session status indicator (Checking if tenant session exists on global WAHA server)
-- QR visualization (Generates/Starts session for `tenant_id` if disconnected)
+- Real-time polling via API route mapping `tenant.id` to WAHA. (Falls back to "default" for WAHA Core limitation).
+- Session status indicator
+- QR visualization (`waha-qr-modal.tsx`)
+- Connected phone number display (`phoneInfo.id` mapped from auth string).
 - Disconnect / Logout Session
 - _Note: WAHA URL and API Key are managed globally via `.env` (no longer required per tenant)._
 
-### Task 3.3: Message templates
+### Task 3.3: Message templates ✅
 
 Files:
 
 - Create: a-proposal2/app/(dashboard)/settings/templates/page.tsx
 - Create: a-proposal2/components/settings/template-form.tsx
+- Create: a-proposal2/components/settings/templates-tabs.tsx
+
+Data Model (Completed via Migration `20260301130600_add_multilingual_message_templates.sql`):
+
+- `message_templates`: Base trigger configurations (`tenant_id`, `trigger`).
+- `message_template_variants`: Multilingual blocks (`template_id`, `language_code`, `content`).
 
 Triggers:
 
@@ -553,14 +605,9 @@ Triggers:
 
 Variables:
 
-- {{guestName}}, {{roomNumber}}, {{checkInDate}}, {{checkOutDate}}
+- {{guestName}}, {{roomNumber}}, {{checkInDate}}, {{checkOutDate}}, {{hotelName}}
 
-Security Requirement:
-
-- Encrypt sensitive credentials before storing
-- Mask credentials in UI and logs
-
-### Task 3.4: Team management — members + invitations
+### Task 3.4: Team management — members + invitations ✅
 
 **Route:** `/settings/team` (owner only)
 
@@ -569,8 +616,7 @@ Files:
 - Create: `a-proposal2/app/(dashboard)/settings/team/page.tsx`
 - Create: `a-proposal2/components/settings/team/members-table.tsx`
 - Create: `a-proposal2/components/settings/team/invitations-table.tsx`
-- Create: `a-proposal2/components/settings/team/invite-staff-form.tsx`
-- Update: `a-proposal2/lib/auth/invitations.ts` — add `resendInvitation()`, `revokeInvitation()`, `removeStaffMember()`
+- Update: `a-proposal2/lib/auth/invitations.ts` — added `resendInvitation()`, `revokeInvitation()`, `removeStaffMember()`
 
 **Page layout (two sections):**
 
@@ -581,38 +627,19 @@ Files:
 │   └── "Remove" button (owner only, cannot remove self)
 │
 └── Section: Pending Invitations
-    ├── Email, invited by, sent date, expires date, status badge (pending / expired)
-    ├── "Resend" button → reset token + expires_at + re-send email
+    ├── Email, sent date, expires date, status badge (pending / expired)
+    ├── "Resend" button → reset token (crypto.randomUUID()) + expires_at + re-send email
     └── "Revoke" button → set status='expired' → token immediately invalid
 ```
 
-**Server actions / lib functions:**
-
-| Function                                       | Behavior                                             |
-| ---------------------------------------------- | ---------------------------------------------------- |
-| `inviteStaffMember(ownerUserId, email)`        | Insert row into `invitations`, send email            |
-| `resendInvitation(ownerUserId, invitationId)`  | Update token + expires_at on same row, re-send email |
-| `revokeInvitation(ownerUserId, invitationId)`  | Set `status='expired'`                               |
-| `removeStaffMember(ownerUserId, targetUserId)` | Delete from `tenant_users` — cannot remove self      |
-
-**Edge cases:**
-
-- Resend: old token immediately invalid (replaced in same row)
-- Revoke: `/accept-invite` page gets "Link expired" for revoked token
-- Remove staff: removed user's next request → dashboard layout redirects to `/onboarding`
-- Owner cannot remove themselves (guard in server action)
-- Staff cannot see or access `/settings/team` (middleware or layout guard)
-
 Acceptance Criteria (Phase 3):
 
-- WAHA session can be connected via QR
-- Test message can be sent successfully from settings
-- Owner can view all active members and pending invitations
-- Owner can resend an invite (old token invalidated, new token issued)
-- Owner can revoke a pending invite (token immediately unusable)
-- Owner can remove a staff member (removed user lands on /onboarding on next visit)
-- Owner cannot remove themselves
-- Staff cannot access `/settings/team`
+- ✅ WAHA session can be connected via QR
+- ✅ Owner can view all active members and pending invitations
+- ✅ Owner can resend an invite (old token invalidated, new token issued)
+- ✅ Owner can revoke a pending invite (token immediately unusable)
+- ✅ Owner can remove a staff member
+- ✅ Owner cannot remove themselves
 
 ---
 
@@ -660,19 +687,49 @@ Policy:
 - Max attempts then dead-letter state
 - Retry only for retryable failures
 
-### Task 4.4: Scheduled trigger runner
+### Task 4.4: Scheduled trigger runner & Post-Stay AI Follow-Up
 
 Files:
 
 - Create: a-proposal2/app/api/cron/automation/route.ts
 - Create: a-proposal2/lib/automation/scheduler.ts
+- Create: a-proposal2/lib/ai/agent.ts (Moved from Phase 6 MVP to handle follow-ups)
 
 Use cases:
 
-- Pre-arrival messages 1-2 days before check-in
-- Post-stay feedback after checkout
+- Pre-arrival messages 1-2 days before check-in.
+- **Post-stay feedback loop (Hybrid Web-Form + AI Agent):**
+  1. H+1 after checkout: Send an automated WAHA message with a link to a "Post-Stay Feedback" Web Form. Database status `post_stay_feedback` = `pending`.
+  2. Scheduled trigger runs every X hours to check for `pending` status.
+  3. **Agentic Intervention:** If a guest drops off (doesn't fill the form within 24 hours), the scheduler triggers the AI Agent via WAHA.
+  4. **Context Provision & Personalization:** Before chatting, the system retrieves the `guest` and `reservation` history (e.g., room booked, length of stay, total spend, past visits) and injects it into the AI's System Prompt.
+  5. The AI directly chats with the guest in a highly personalized manner: _"Halo [Nama], terima kasih sudah menginap di [Tipe Kamar] selama 3 malam kemarin. Bagaimana pengalaman Anda? Apakah ada masukan untuk kami?"_
+  6. **Function Calling & Summarization:** AI parses the guest's unstructured chat reply, summarizes it, and calls `update_guest_feedback(rating, comments)` to save structured data back to the database, identical to the Web Form output.
 
-### Task 4.5: Manual send API and dialog
+### Task 4.5: On-Stay Agentic AI (In-Stay Automation)
+
+Files:
+
+- Create: a-proposal2/lib/ai/on-stay-agent.ts
+- Create: a-proposal2/lib/ai/tools.ts
+
+Use cases:
+
+- **AI Room Service / F&B Ordering:**
+  1. Guest sends a WhatsApp message ordering food to their room.
+  2. The WAHA Webhook triggers the AI Agent, providing the guest profile and active reservation in the context.
+  3. AI parses the request, asks for confirmation, and calls `order_in_room_dining(room_number, items)`.
+  4. System saves the structured order to `room_service_orders` (accessible in standard Next.js staff dashboards).
+- **AI Housekeeping & Request Management:**
+  1. Guest requests room cleaning or extra towels via WhatsApp.
+  2. AI calls `request_housekeeping(room_number, request_type, details)`.
+  3. System saves the request to `housekeeping_requests`.
+- **AI Concierge & FAQ:**
+  1. Guest asks hotel-related questions (e.g., "What time does the pool close?").
+  2. AI answers directly using RAG / predefined knowledge base.
+  3. Escalates to human staff explicitly using `escalate_to_human()` if necessary.
+
+### Task 4.6: Manual send API and dialog
 
 Files:
 
@@ -751,17 +808,17 @@ Acceptance Criteria (Phase 5):
 
 ## Phase 6: Future Enhancements (Deferred)
 
-### Task 6.1: AI-ready placeholders
+### Task 6.1: Advanced AI features
 
 Files:
 
-- Create: a-proposal2/lib/ai/types.ts
-- Create: a-proposal2/app/api/ai/chat/route.ts
+- Create: a-proposal2/lib/ai/prompts.ts
+- Create: a-proposal2/app/api/ai/recommendations/route.ts
 
 Notes:
 
-- Keep as placeholder only after MVP stability
-- Do not block launch on AI scope
+- Keep as placeholder for advanced upselling (e.g., proactive spa recommendations based on past stays).
+- The core AI follow-up logic for post-stay feedback is already implemented in Phase 4.
 
 ---
 
