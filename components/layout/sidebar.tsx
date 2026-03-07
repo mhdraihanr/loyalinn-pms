@@ -24,23 +24,42 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOutUser } from "@/lib/auth/logout";
 
-const navItems = [
-  { href: "/", label: "Dashboard", icon: IconLayoutDashboard },
-  { href: "/guests", label: "Guests", icon: IconUsers },
+const navGroups = [
   {
-    href: "/reservations",
-    label: "Reservations",
-    icon: IconCalendarEvent,
+    label: "FRONT DESK",
+    items: [
+      { href: "/", label: "Dashboard", icon: IconLayoutDashboard },
+      { href: "/guests", label: "Guests", icon: IconUsers },
+      {
+        href: "/reservations",
+        label: "Reservations",
+        icon: IconCalendarEvent,
+      },
+    ],
   },
-  { href: "/settings", label: "Settings", icon: IconSettings },
-  { href: "/settings/pms", label: "PMS Config", icon: IconSettings },
-  { href: "/settings/waha", label: "WhatsApp Connect", icon: IconSettings },
   {
-    href: "/settings/templates",
-    label: "Message Templates",
-    icon: IconSettings,
+    label: "OPERATIONS",
+    items: [
+      {
+        href: "/operations",
+        label: "AI Requests (Phase 4)",
+        icon: IconLayoutDashboard, // You can change this later to IconConciergeBell or similar
+      },
+    ],
   },
-  { href: "/settings/team", label: "Team Management", icon: IconUsers },
+  {
+    label: "SETTINGS",
+    items: [
+      { href: "/settings/pms", label: "PMS Config", icon: IconSettings },
+      { href: "/settings/waha", label: "WhatsApp Connect", icon: IconSettings },
+      {
+        href: "/settings/templates",
+        label: "Message Templates",
+        icon: IconSettings,
+      },
+      { href: "/settings/team", label: "Team Management", icon: IconUsers },
+    ],
+  },
 ];
 
 export function Sidebar({ hotelName }: { hotelName: string }) {
@@ -78,20 +97,32 @@ export function Sidebar({ hotelName }: { hotelName: string }) {
         <Divider mb="md" />
 
         {/* Nav links */}
-        <Stack gap={4} style={{ flex: 1 }}>
-          {navItems.map((item) => {
-            const isActive = pathname === item.href;
-            return (
-              <NavLink
-                key={item.href}
-                component={Link}
-                href={item.href}
-                label={item.label}
-                leftSection={<item.icon size={18} />}
-                active={isActive}
-              />
-            );
-          })}
+        <Stack
+          gap={4}
+          style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}
+        >
+          {navGroups.map((group) => (
+            <Box key={group.label} mb="sm">
+              <Text size="xs" fw={600} c="dimmed" mb={4} px="sm">
+                {group.label}
+              </Text>
+              {group.items.map((item) => {
+                const isActive = pathname === item.href;
+                return (
+                  <NavLink
+                    key={item.href}
+                    component={Link}
+                    href={item.href}
+                    label={item.label}
+                    leftSection={<item.icon size={18} />}
+                    active={isActive}
+                    variant="light"
+                    style={{ borderRadius: "var(--mantine-radius-sm)" }}
+                  />
+                );
+              })}
+            </Box>
+          ))}
         </Stack>
 
         <Divider my="md" />
