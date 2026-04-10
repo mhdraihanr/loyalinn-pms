@@ -92,7 +92,7 @@ CREATE TABLE reservations (
   status TEXT NOT NULL CHECK (status IN ('pre-arrival', 'on-stay', 'checked-out', 'cancelled')),
   amount DECIMAL(10, 2),
   source TEXT,
-  post_stay_feedback_status TEXT DEFAULT 'not-sent' CHECK (post_stay_feedback_status IN ('not-sent', 'pending', 'completed')),
+  post_stay_feedback_status TEXT DEFAULT 'not-sent' CHECK (post_stay_feedback_status IN ('not-sent', 'pending', 'ai_followup', 'completed', 'ignored')),
   post_stay_rating INTEGER CHECK (post_stay_rating >= 1 AND post_stay_rating <= 5),
   post_stay_comments TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),

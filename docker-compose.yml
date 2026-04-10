@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  waha:
+    image: devlikeapro/waha
+    container_name: waha_server
+    # Port Host 3001 mengarah ke Port Container 3000
+    ports:
+      - "3001:3000"
+    environment:
+      # Kredensial untuk Dashboard / Swagger UI
+      - WAHA_DASHBOARD_USERNAME=admin
+      - WAHA_DASHBOARD_PASSWORD=admin123
+
+      # Kredensial API WAHA (sama dengan di .env.local kamu)
+      - WHATSAPP_API_KEY=raihan-secret-key
+      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+    volumes:
+      # Menyimpan data session WA agar tidak perlu scan QR tiap kali restart
+      - ./.waha_data:/app/.waha
+    # Opsi ini membuat WAHA selalu auto-start selama Docker menyala!
+    restart: always
