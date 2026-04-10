@@ -58,6 +58,15 @@ const navGroups = [
         icon: IconSettings,
       },
       { href: "/settings/team", label: "Team Management", icon: IconUsers },
+      ...(process.env.NODE_ENV === "development"
+        ? [
+            {
+              href: "/settings/developer",
+              label: "Dev Tools (Time Machine)",
+              icon: IconSettings,
+            },
+          ]
+        : []),
     ],
   },
 ];

@@ -201,35 +201,39 @@ async function upsertGuest(params: {
 }
 
 async function upsertReservation(params: {
+  id?: string;
   tenantId: string;
   guestId: string;
   reservation: AdapterReservation;
   status: string;
 }) {
   const adminClient = createAdminClient();
+
+  const payload = {
+    ...(params.id ? { id: params.id } : {}),
+    tenant_id: params.tenantId,
+    guest_id: params.guestId,
+    pms_reservation_id: params.reservation.pms_reservation_id,
+    room_number: params.reservation.room_number ?? null,
+    check_in_date: params.reservation.check_in_date,
+    check_out_date: params.reservation.check_out_date,
+    status: params.status,
+    amount: params.reservation.amount ?? null,
+    source: params.reservation.source ?? null,
+  };
+
   const { data, error } = await adminClient
     .from("reservations")
-    .upsert(
-      {
-        tenant_id: params.tenantId,
-        guest_id: params.guestId,
-        pms_reservation_id: params.reservation.pms_reservation_id,
-        room_number: params.reservation.room_number ?? null,
-        check_in_date: params.reservation.check_in_date,
-        check_out_date: params.reservation.check_out_date,
-        status: params.status,
-        amount: params.reservation.amount ?? null,
-        source: params.reservation.source ?? null,
-      },
-      { onConflict: "tenant_id,pms_reservation_id", ignoreDuplicates: false },
-    )
+    .upsert(payload, {
+      onConflict: params.id ? "id" : "tenant_id,pms_reservation_id",
+      ignoreDuplicates: false,
+    })
     .select("id")
     .single();
 
   if (error) {
     throw new Error(error.message);
   }
-
   return data as UpsertedReservation;
 }
 
@@ -291,6 +295,7 @@ export async function runAutoSyncForTenant({
     });
 
     const upsertedReservation = await upsertReservation({
+      id: existing?.id,
       tenantId,
       guestId: guest.id,
       reservation,

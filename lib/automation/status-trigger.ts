@@ -26,6 +26,7 @@ type ReservationGuest = {
   id: string | null;
   name: string | null;
   phone: string | null;
+  country: string | null;
 };
 
 type ReservationTenant = {
@@ -50,14 +51,33 @@ function getSingleRelation<T>(value: T | T[] | null | undefined): T | null {
 
   return Array.isArray(value) ? (value[0] ?? null) : value;
 }
+function detectPreferredLanguage(
+  phone: string | null,
+  country: string | null,
+): string {
+  if (country) {
+    const c = country.toLowerCase().trim();
+    if (c === "indonesia" || c === "id") return "id";
+    if (c === "china" || c === "zh") return "zh";
+    if (c === "japan" || c === "jp") return "ja";
+  }
 
+  if (phone) {
+    const cleaned = phone.replace(/\D/g, "");
+    if (cleaned.startsWith("62") || phone.trim().startsWith("0")) return "id";
+    if (cleaned.startsWith("86")) return "zh";
+    if (cleaned.startsWith("81")) return "ja";
+  }
+
+  return "en";
+}
 export async function processStatusTriggerJob(job: StatusTriggerJob) {
   const adminClient = createAdminClient();
 
   const { data: reservation, error: reservationError } = await adminClient
     .from("reservations")
     .select(
-      "id, status, updated_at, room_number, check_in_date, check_out_date, guests(id, name, phone), tenants(name)",
+      "id, status, updated_at, room_number, check_in_date, check_out_date, guests(id, name, phone, country), tenants(name)",
     )
     .eq("tenant_id", job.tenantId)
     .eq("pms_reservation_id", job.payload.booking_id)
@@ -79,6 +99,10 @@ export async function processStatusTriggerJob(job: StatusTriggerJob) {
     reservation.tenants,
   ) as ReservationTenant | null;
 
+  console.log(
+    `[STATUS-TRIGGER] job=${job.id} trigger=${job.triggerType} guestPhone=${guest?.phone} guestCountry=${guest?.country}`,
+  );
+
   if (isOutOfOrderEvent(reservation.updated_at, job.payload.updated_at)) {
     await completeAutomationJob(job.id, undefined);
     return;
@@ -96,9 +120,18 @@ export async function processStatusTriggerJob(job: StatusTriggerJob) {
     return;
   }
 
+  const preferredLanguage = detectPreferredLanguage(
+    guest?.phone ?? null,
+    guest?.country ?? null,
+  );
+
   const templateVariant = selectTemplateVariant(
     template?.message_template_variants ?? [],
-    "en",
+    preferredLanguage,
+  );
+
+  console.log(
+    `[STATUS-TRIGGER-SELECT] preferred=${preferredLanguage} variantLang=${templateVariant?.language_code}`,
   );
 
   const { data: existingSentLog } = await adminClient

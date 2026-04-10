@@ -22,7 +22,7 @@ function mapQloAppsStatus(status: string): string {
     case "2":
       return "on-stay";
     case "3":
-      return "checked-out";
+      return "post-stay";
     case "4":
     case "6":
       return "cancelled";

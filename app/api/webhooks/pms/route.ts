@@ -104,7 +104,16 @@ export async function POST(request: Request) {
   if (inboundError) {
     return NextResponse.json({ error: inboundError.message }, { status: 500 });
   }
-
+  // Opsi A: Pre-arrival and post-stay are processed strictly by the scheduler cron.
+  // We only trigger real-time automation messages for immediate actions like early check-in (on-stay).
+  const realtimeTriggers = ["on-stay", "cancelled"];
+  if (!realtimeTriggers.includes(normalizedEvent.status)) {
+    return NextResponse.json({
+      received: true,
+      duplicate: false,
+      job_enqueued: false,
+    });
+  }
   const { error: jobError } = await adminClient.from("automation_jobs").insert({
     tenant_id: normalizedEvent.tenantId,
     job_type: "status-trigger",

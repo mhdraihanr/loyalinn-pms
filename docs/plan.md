@@ -522,7 +522,8 @@ Adapter interface must include:
 Sync Service Expectations:
 
 - Act as middleware between adapter data and Supabase `guests` and `reservations` tables
-- Uses `createAdminClient()` to perform database upserts reliably
+- Uses `createAdminClient()` to perform database upserts reliably, leveraging strict UUID-based updates to prevent duplicate `pms_reservation_id` records.
+- Enforces a "Keep Web Clean" policy: Safely ignores/drops completed QloApps orders (checked-out/cancelled) if they don't exist locally, preventing the resurrection of soft-deleted reservations.
 - Emits change events for downstream automation when reservation state changes
 
 ### Task 2.4: First production adapter and Sync UI ✅
@@ -739,13 +740,19 @@ Files:
 - Create: a-proposal2/lib/pms/dev-sync-scheduler.ts
 - Create: a-proposal2/instrumentation.ts
 - Create: a-proposal2/components/layout/page-auto-refresh.tsx
+- Create: a-proposal2/components/settings/developer-time-machine.tsx
 - Create: a-proposal2/lib/ai/agent.ts (Moved from Phase 6 MVP to handle follow-ups)
 
 Current implementation status:
 
 - ✅ `app/api/cron/automation/route.ts` and `lib/automation/scheduler.ts` are implemented.
 - ✅ Scheduled pre-arrival and post-stay jobs are created idempotently and processed through the cron worker.
+- ✅ Custom Developer Time Machine tool built (`/api/dev/scheduler`) allowing admins to simulate future/past worker runs with UTC locking bypasses, resolving Multi-Tenant queue tracking.
+- ✅ Overcame Next.js aggressive cache returning old templates using `cache: "no-store"` and `force-dynamic` to ensure fresh DB reads.
+- ✅ Optimized `pms-sync-cron.ts` lookback window from 30 days to 3 days to maximize processing speed.
 - ✅ PMS polling is connected to automation ingestion through `lib/pms/auto-sync-service.ts`.
+- ✅ Local development startup now supports separate `DEV_PMS_SYNC_INTERVAL_MS` and `DEV_AUTOMATION_SYNC_INTERVAL_MS` intervals for the two schedulers.
+- ✅ Production scheduling is defined through `vercel.json` for `/api/cron/pms-sync` every 5 minutes and `/api/cron/automation` every minute.
 - 🚧 `lib/ai/agent.ts` for post-stay follow-up is still pending.
 
 Use cases:

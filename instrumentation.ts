@@ -5,6 +5,9 @@ export async function register() {
 
   const { startDevelopmentPmsSyncScheduler } =
     await import("./lib/pms/dev-sync-scheduler");
+  const { startDevelopmentAutomationScheduler } =
+    await import("./lib/automation/dev-automation-scheduler");
 
   startDevelopmentPmsSyncScheduler();
+  startDevelopmentAutomationScheduler();
 }

@@ -61,6 +61,7 @@ mocks.inboundEventInsertMock.mockImplementation(() => ({
 }));
 
 const adapter = {
+      init: vi.fn(),
   pullReservations: vi.fn(),
   pullGuest: vi.fn(),
   mapStatus: vi.fn(),

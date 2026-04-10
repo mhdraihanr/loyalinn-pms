@@ -65,8 +65,9 @@ async function enqueueIfMissing(
 
 export async function enqueueScheduledAutomationJobs(
   now = new Date(),
+  options: { force?: boolean } = {},
 ): Promise<SchedulerResult> {
-  if (!isSchedulingWindowOpen(now)) {
+  if (!options.force && !isSchedulingWindowOpen(now)) {
     return {
       preArrivalEnqueued: 0,
       postStayEnqueued: 0,
