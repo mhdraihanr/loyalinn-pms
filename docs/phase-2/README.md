@@ -17,14 +17,14 @@ Phase 2 focuses on establishing the architecture for Property Management System 
    - Built a secure settings form allowing the Tenant Owner to configure their PMS Provider, Endpoint URI, and API Keys.
    - Config is saved to the `pms_configurations` table.
 
-3. **PMS Sync Middleware (`lib/pms/sync-service.ts`)**
-   - Created a robust synchronization service that translates generic PMS adapter objects (`AdapterReservation`, `AdapterGuest`) into Supabase entries.
+3. **PMS Sync Service (`lib/pms/auto-sync-service.ts`)**
+   - The sync layer now uses polling-based background ingestion to translate generic PMS adapter objects (`AdapterReservation`, `AdapterGuest`) into Supabase entries.
    - Utilizes `createAdminClient` to bypass RLS safely when performing background data ingestion.
 
 4. **Mock Adapter & End-to-End Testing (`lib/pms/mock-adapter.ts`)**
    - Developed a Mock Adapter to simulate bringing in reservation data.
-   - Attached a "Sync PMS" manual trigger button (`components/reservations/sync-button.tsx`) to the reservations page.
-   - This button orchestrates background fetching through a Server Action (`lib/pms/sync-action.ts`), providing real-time toast notifications and securely upserting guest and reservation records via the middleware.
+   - The production sync path now runs through the secured cron endpoint at `/api/cron/pms-sync`.
+   - That endpoint orchestrates background fetching through `lib/pms/auto-sync-service.ts`, securely upserting guest and reservation records and emitting automation events on real changes.
 
 ## Next Steps
 

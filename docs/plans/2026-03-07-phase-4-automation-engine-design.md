@@ -13,21 +13,25 @@ This design covers:
 - Database-backed job queue processing
 - Status-based trigger resolution for `pre-arrival`, `on-stay`, and `post-stay`
 - WAHA delivery orchestration
+- Scheduled trigger orchestration through a dedicated scheduler module
+- Post-stay AI follow-up orchestration after the initial automated message
+- On-stay AI workflows for room service, housekeeping, and concierge requests
+- Operations dashboard support for staff-facing operational requests
 - Retry and dead-letter behavior
 - Observability and test strategy
 
 This design does not cover:
 
-- AI follow-up flows
-- UI for manual send dialogs
 - External queue infrastructure such as Redis, SQS, or RabbitMQ
+
+Manual send remains deferred to Phase 6 per the master plan.
 
 ## Current Project Context
 
 Existing foundations already support this work:
 
 - `reservations`, `inbound_events`, `automation_jobs`, and `message_logs` exist in the database schema
-- PMS sync already normalizes reservation records through `lib/pms/sync-service.ts`
+- PMS sync now normalizes reservation records through `lib/pms/auto-sync-service.ts` and `app/api/cron/pms-sync/route.ts`
 - WAHA transport exists in `lib/waha/client.ts`
 - Template management and multilingual variants already exist
 - Structured logging is available in `lib/observability/logger.ts`
@@ -64,9 +68,11 @@ If `updated_at` is unavailable in a payload, the system can fall back to a paylo
 2. The route reads the raw body, validates the secret or signature, normalizes the payload, computes the idempotency key, and inserts an event record
 3. The route enqueues an `automation_jobs` record and returns `200` quickly
 4. A cron route at `app/api/cron/automation/route.ts` claims due jobs from Postgres using `FOR UPDATE SKIP LOCKED`
-5. `lib/automation/status-trigger.ts` resolves the trigger, template, guest, and reservation state
-6. The system renders the message, writes a `message_logs` draft row, sends the message through `lib/waha/client.ts`, and updates message and job state
-7. Retry policy reschedules eligible failures and moves terminal failures to dead-letter
+5. `lib/automation/scheduler.ts` determines which scheduled `pre-arrival` and `post-stay` jobs should exist and enqueues them idempotently
+6. `lib/automation/status-trigger.ts` resolves the trigger, template, guest, and reservation state
+7. The system renders the message, writes a `message_logs` draft row, sends the message through `lib/waha/client.ts`, and updates message and job state
+8. Retry policy reschedules eligible failures and moves terminal failures to dead-letter
+9. Post-stay and on-stay AI handlers consume the same reservation and guest context after the reliable messaging core is in place
 
 ## Trigger Rules
 
@@ -202,19 +208,40 @@ Recommended backoff progression:
 Responsibilities:
 
 - authenticate scheduler access with a cron secret
-- enqueue scheduled `pre-arrival` and `post-stay` jobs
+- delegate scheduling decisions to `lib/automation/scheduler.ts`
 - claim and process a small batch of pending jobs
 - return a batch summary for monitoring
 
-### `app/api/messages/send/route.ts`
+### `lib/automation/scheduler.ts`
 
 Responsibilities:
 
-- validate manual send requests
-- resolve preview and enqueue a `manual-send` job
-- reuse the same queue and delivery pipeline
+- find reservations eligible for `pre-arrival` and `post-stay`
+- avoid duplicate scheduled jobs or duplicate successful sends
+- prepare follow-up checks for post-stay feedback escalation
 
-This route is lower priority than the core webhook and cron flow.
+### `lib/ai/agent.ts`
+
+Responsibilities:
+
+- drive the post-stay AI follow-up after the H+1 automated message
+- use reservation and guest history as context input
+- summarize guest feedback into structured fields
+
+### `lib/ai/on-stay-agent.ts` and `lib/ai/tools.ts`
+
+Responsibilities:
+
+- parse inbound on-stay guest requests
+- create `room_service_orders` or `housekeeping_requests`
+- answer concierge-style questions or escalate to a human
+
+### `app/(dashboard)/operations/page.tsx`
+
+Responsibilities:
+
+- display staff-facing operational queues for housekeeping and room service
+- allow staff to update request status safely within tenant boundaries
 
 ## Error Handling
 
@@ -274,6 +301,8 @@ Cover:
 - cron processing claims only eligible jobs
 - WAHA temporary failure triggers reschedule
 - WAHA success updates `message_logs` and `automation_jobs`
+- scheduler enqueues `pre-arrival` and `post-stay` jobs once
+- on-stay AI tool calls create housekeeping and room service records
 
 ### Contract tests
 
@@ -281,6 +310,14 @@ Cover:
 
 - QloApps payload normalization
 - field mapping for `booking_id`, `status`, `updated_at`, guest phone, and stay dates
+
+### Workflow tests
+
+Cover:
+
+- H+1 post-stay message sets feedback state to pending
+- follow-up escalation waits for the configured timeout before invoking AI
+- staff can see and update AI-generated operational requests from the dashboard
 
 ## Acceptance Criteria
 
@@ -294,3 +331,5 @@ Cover:
 ## Recommendation Summary
 
 The recommended MVP implementation is a Postgres-backed queue with asynchronous cron-driven processing. This keeps webhook latency low, reuses the existing schema and WAHA client, and gives the project a reliable foundation for future AI and manual-send features.
+
+The execution order should still prioritize the reliable delivery core first, then layer scheduler behavior, then AI workflows, then the operations dashboard.

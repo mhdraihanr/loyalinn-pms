@@ -4,7 +4,7 @@ import { getReservations } from "@/lib/data/reservations";
 import { getCurrentUserTenant } from "@/lib/auth/tenant";
 import { ReservationsTable } from "@/components/reservations/reservations-table";
 import { ReservationsTabs } from "@/components/reservations/reservations-tabs";
-import { SyncButton } from "@/components/reservations/sync-button";
+import { PageAutoRefresh } from "@/components/layout/page-auto-refresh";
 import { redirect } from "next/navigation";
 
 export const metadata = {
@@ -35,27 +35,28 @@ export default async function ReservationsPage({
   const currentStatus = params.status || "all";
 
   return (
-    <Box>
-      <Group justify="space-between" align="flex-start" mb="lg">
-        <div>
-          <Title order={2}>Reservations</Title>
-          <Text c="dimmed" size="sm">
-            View and manage your hotel reservations
-          </Text>
-        </div>
-        <SyncButton />
-      </Group>
+    <PageAutoRefresh intervalMs={10_000}>
+      <Box>
+        <Group justify="space-between" align="flex-start" mb="lg">
+          <div>
+            <Title order={2}>Reservations</Title>
+            <Text c="dimmed" size="sm">
+              View and manage your hotel reservations
+            </Text>
+          </div>
+        </Group>
 
-      <Paper radius="md" p="md" withBorder shadow="sm">
-        <ReservationsTabs currentStatus={currentStatus} />
+        <Paper radius="md" p="md" withBorder shadow="sm">
+          <ReservationsTabs currentStatus={currentStatus} />
 
-        <Suspense fallback={<Skeleton height={400} radius="md" />}>
-          <ReservationsContent
-            tenantId={tenantUser.tenantId}
-            status={currentStatus}
-          />
-        </Suspense>
-      </Paper>
-    </Box>
+          <Suspense fallback={<Skeleton height={400} radius="md" />}>
+            <ReservationsContent
+              tenantId={tenantUser.tenantId}
+              status={currentStatus}
+            />
+          </Suspense>
+        </Paper>
+      </Box>
+    </PageAutoRefresh>
   );
 }

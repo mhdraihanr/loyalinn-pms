@@ -510,7 +510,7 @@ Features:
 Files:
 
 - Create: a-proposal2/lib/pms/adapter.ts
-- Create: a-proposal2/lib/pms/sync-service.ts
+- Create: a-proposal2/lib/pms/auto-sync-service.ts
 
 Adapter interface must include:
 
@@ -523,22 +523,21 @@ Sync Service Expectations:
 
 - Act as middleware between adapter data and Supabase `guests` and `reservations` tables
 - Uses `createAdminClient()` to perform database upserts reliably
-- Triggers UI notifications using logger / `@mantine/notifications` appropriately
+- Emits change events for downstream automation when reservation state changes
 
 ### Task 2.4: First production adapter and Sync UI ✅
 
 Files:
 
 - Create: a-proposal2/lib/pms/mock-adapter.ts (MVP implementation)
-- Create: a-proposal2/lib/pms/sync-action.ts (Server action to trigger sync)
-- Create: a-proposal2/components/reservations/sync-button.tsx (Client component UI)
+- Create: a-proposal2/app/api/cron/pms-sync/route.ts (Secured polling sync route)
 
 Acceptance Criteria (Phase 2):
 
 - Tenant can safely save PMS credentials via settings UI
 - Synchronization service correctly persists adapter data to DB
 - One adapter passes sync smoke test end-to-end
-- Sync can be triggered manually via a dashboard button
+- Sync can be triggered automatically via a secured scheduler or cron caller
 - Internal reservation status mapping is deterministic and documented
 - Database RLS policies are optimized using `SECURITY DEFINER` functions to prevent infinite recursion loops during synchronization
 
@@ -643,13 +642,52 @@ Acceptance Criteria (Phase 3):
 
 ---
 
-## Phase 4: Automation Engine (Reliable Delivery)
+## Phase 4: Automation Engine (Reliable Delivery) 🚧 IN PROGRESS
 
-### Task 4.1: PMS webhook endpoint
+Current Status (2026-03-07):
+
+- ✅ Reliable delivery core is complete through webhook ingestion, status-trigger orchestration, queue/retry handling, and cron-driven scheduler execution.
+- ✅ Phase 4 schema support is in place via `20260307123000_add_phase4_automation_metadata.sql` and `20260307160000_add_claim_automation_jobs_function.sql`.
+- ✅ PMS polling now feeds the automation pipeline through `lib/pms/auto-sync-service.ts`, `lib/pms/pms-sync-cron.ts`, and the development-only scheduler in `lib/pms/dev-sync-scheduler.ts`.
+- 🚧 Post-stay AI follow-up orchestration is not implemented yet.
+- 🚧 On-stay AI tooling and the Operations dashboard are not implemented yet.
+
+Implemented files tracked for Phase 4 to date (Tasks 1-8):
+
+- Database and migrations:
+  - `supabase/migrations/20260307123000_add_phase4_automation_metadata.sql`
+  - `supabase/migrations/20260307160000_add_claim_automation_jobs_function.sql`
+  - `supabase/schema.sql` (updated to match migration state)
+- Automation core:
+  - `lib/automation/types.ts`
+  - `lib/automation/idempotency.ts`
+  - `lib/automation/retry-policy.ts`
+  - `lib/automation/queue.ts`
+  - `lib/automation/template-renderer.ts`
+  - `lib/automation/qloapps-normalizer.ts`
+  - `lib/automation/status-trigger.ts`
+  - `lib/automation/scheduler.ts`
+- Routes and PMS orchestration:
+  - `app/api/webhooks/pms/route.ts`
+  - `app/api/cron/automation/route.ts`
+  - `app/api/cron/pms-sync/route.ts`
+  - `lib/pms/auto-sync-service.ts`
+  - `lib/pms/pms-sync-cron.ts`
+  - `lib/pms/dev-sync-scheduler.ts`
+  - `instrumentation.ts`
+- UI support for development visibility:
+  - `components/layout/page-auto-refresh.tsx`
+
+### Task 4.1: PMS webhook endpoint ✅
 
 Files:
 
 - Create: a-proposal2/app/api/webhooks/pms/route.ts
+- Create: a-proposal2/lib/automation/qloapps-normalizer.ts
+- Create: a-proposal2/lib/automation/types.ts
+- Create: a-proposal2/lib/automation/idempotency.ts
+- Modify: a-proposal2/supabase/schema.sql
+- Create: a-proposal2/supabase/migrations/20260307123000_add_phase4_automation_metadata.sql
 
 Required controls:
 
@@ -658,11 +696,12 @@ Required controls:
 - Replay protection (nonce or event id cache)
 - Idempotency on event ingestion
 
-### Task 4.2: Status trigger engine
+### Task 4.2: Status trigger engine ✅
 
 Files:
 
 - Create: a-proposal2/lib/automation/status-trigger.ts
+- Create: a-proposal2/lib/automation/template-renderer.ts
 
 Flow:
 
@@ -674,12 +713,13 @@ Flow:
 6. Enqueue send job
 7. Persist log and delivery state
 
-### Task 4.3: Queue, retry, dead-letter
+### Task 4.3: Queue, retry, dead-letter ✅
 
 Files:
 
 - Create: a-proposal2/lib/automation/queue.ts
 - Create: a-proposal2/lib/automation/retry-policy.ts
+- Create: a-proposal2/supabase/migrations/20260307160000_add_claim_automation_jobs_function.sql
 
 Policy:
 
@@ -687,13 +727,26 @@ Policy:
 - Max attempts then dead-letter state
 - Retry only for retryable failures
 
-### Task 4.4: Scheduled trigger runner & Post-Stay AI Follow-Up
+### Task 4.4: Scheduled trigger runner & Post-Stay AI Follow-Up 🚧 PARTIALLY COMPLETE
 
 Files:
 
 - Create: a-proposal2/app/api/cron/automation/route.ts
 - Create: a-proposal2/lib/automation/scheduler.ts
+- Create: a-proposal2/app/api/cron/pms-sync/route.ts
+- Create: a-proposal2/lib/pms/auto-sync-service.ts
+- Create: a-proposal2/lib/pms/pms-sync-cron.ts
+- Create: a-proposal2/lib/pms/dev-sync-scheduler.ts
+- Create: a-proposal2/instrumentation.ts
+- Create: a-proposal2/components/layout/page-auto-refresh.tsx
 - Create: a-proposal2/lib/ai/agent.ts (Moved from Phase 6 MVP to handle follow-ups)
+
+Current implementation status:
+
+- ✅ `app/api/cron/automation/route.ts` and `lib/automation/scheduler.ts` are implemented.
+- ✅ Scheduled pre-arrival and post-stay jobs are created idempotently and processed through the cron worker.
+- ✅ PMS polling is connected to automation ingestion through `lib/pms/auto-sync-service.ts`.
+- 🚧 `lib/ai/agent.ts` for post-stay follow-up is still pending.
 
 Use cases:
 
@@ -706,7 +759,7 @@ Use cases:
   5. The AI directly chats with the guest in a highly personalized manner: _"Halo [Nama], terima kasih sudah menginap di [Tipe Kamar] selama 3 malam kemarin. Bagaimana pengalaman Anda? Apakah ada masukan untuk kami?"_
   6. **Function Calling & Summarization:** AI parses the guest's unstructured chat reply, summarizes it, and calls `update_guest_feedback(rating, comments)` to save structured data back to the database, identical to the Web Form output.
 
-### Task 4.5: On-Stay Agentic AI (In-Stay Automation)
+### Task 4.5: On-Stay Agentic AI (In-Stay Automation) 🚧
 
 Files:
 
@@ -729,20 +782,7 @@ Use cases:
   2. AI answers directly using RAG / predefined knowledge base.
   3. Escalates to human staff explicitly using `escalate_to_human()` if necessary.
 
-### Task 4.6: Manual send API and dialog
-
-Files:
-
-- Create: a-proposal2/app/api/messages/send/route.ts
-- Create: a-proposal2/components/messages/send-dialog.tsx
-
-Features:
-
-- Pick reservation/guest
-- Preview rendered template
-- Send immediately
-
-### Task 4.7: Operations Dashboard (Housekeeping & Room Service)
+### Task 4.6: Operations Dashboard (Housekeeping & Room Service) 🚧
 
 Files:
 
@@ -758,10 +798,10 @@ Features:
 
 Acceptance Criteria (Phase 4):
 
-- Duplicate webhook payload does not send duplicate message
-- Failed sends are retried and visible in logs
-- Scheduled jobs execute in expected windows
-- Staff can view and update AI-generated requests in the Operations dashboard
+- ✅ Duplicate webhook payload does not send duplicate message
+- ✅ Failed sends are retried and visible in logs
+- ✅ Scheduled jobs execute in expected windows
+- 🚧 Staff can view and update AI-generated requests in the Operations dashboard
 
 ---
 
@@ -834,6 +874,19 @@ Notes:
 
 - Keep as placeholder for advanced upselling (e.g., proactive spa recommendations based on past stays).
 - The core AI follow-up logic for post-stay feedback is already implemented in Phase 4.
+
+### Task 6.2: Manual send API and dialog
+
+Files:
+
+- Create: a-proposal2/app/api/messages/send/route.ts
+- Create: a-proposal2/components/messages/send-dialog.tsx
+
+Features:
+
+- Pick reservation/guest
+- Preview rendered template
+- Send immediately
 
 ---
 

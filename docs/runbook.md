@@ -64,7 +64,7 @@ requestId:"abc-123" AND level:"error"
 **Recovery:**
 
 - Webhooks will retry automatically
-- Manual sync available via admin panel
+- Trigger `GET /api/cron/pms-sync` with the cron bearer token if an immediate pull is required
 - Check for data gaps after recovery
 
 ### WAHA Down
