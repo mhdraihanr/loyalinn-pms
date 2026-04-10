@@ -357,23 +357,15 @@ ALTER TABLE pms_configurations
     CHECK (pms_type IN ('cloudbeds', 'mews', 'qloapps', 'custom'));
 ```
 
-### Step 3: Update the Sync Action Adapter Factory
+### Step 3: Update the Auto-Sync Adapter Factory
 
-In `lib/pms/sync-action.ts`, update the adapter selection logic inside `triggerManualSync()`:
+In `app/api/cron/pms-sync/route.ts`, ensure the cron sync route resolves the adapter dynamically for each active PMS configuration:
 
 ```typescript
-import { QloAppsAdapter } from "./qloapps-adapter";
-import { MockAdapter } from "./mock-adapter";
-import { PMSAdapter } from "./adapter";
+import { getPMSAdapter } from "@/lib/pms/registry";
 
-// Inside triggerManualSync(), replace the hardcoded MockAdapter initialization:
-let adapter: PMSAdapter;
-if (config.pms_type === "qloapps") {
-  adapter = new QloAppsAdapter();
-} else {
-  adapter = new MockAdapter(); // fallback for other types
-}
-adapter.init(config.credentials, config.endpoint);
+const adapter = getPMSAdapter(configuration.pms_type);
+adapter.init(configuration.credentials, configuration.endpoint);
 
 // Sync from 7 days ago to 7 days in the future
 // to capture ongoing stays that checked in before today.
@@ -387,15 +379,15 @@ nextWeek.setDate(today.getDate() + 7);
 const startDate = lastWeek.toISOString().split("T")[0];
 const endDate = nextWeek.toISOString().split("T")[0];
 
-const result = await syncReservations(
-  adminCheck.tenantId, // Passed securely from requireOwner()
+const result = await runAutoSyncForTenant({
+  tenantId: configuration.tenant_id,
   adapter,
   startDate,
   endDate,
-);
+});
 ```
 
-> **Note on RLS**: Thanks to the recent Phase 2 RLS fix (`20260220000000_fix_rls_recursion.sql`), the background worker logic in `syncReservations` bypasses RLS using `createAdminClient`, allowing seamless upserts for the `tenantId`.
+> **Note on RLS**: Thanks to the recent Phase 2 RLS fix (`20260220000000_fix_rls_recursion.sql`), the background worker logic in `runAutoSyncForTenant` bypasses RLS using `createAdminClient`, allowing seamless upserts for the `tenantId`.
 
 ### Step 4: Update the Server Action Validation
 
@@ -415,7 +407,7 @@ if (!["cloudbeds", "mews", "qloapps", "custom"].includes(pmsType)) {
 | **API Endpoint URL**     | `http://localhost:8080`               |
 | **API Key**              | _(The key generated in Step 4 above)_ |
 
-After saving, clicking **"Sync PMS"** on the Reservations page will pull data from QloApps into the application.
+After saving, the scheduled `/api/cron/pms-sync` worker will pull data from QloApps into the application. For debugging, you can trigger that route manually with the correct `Authorization: Bearer ${CRON_SECRET}` header.
 
 ---
 
@@ -426,7 +418,7 @@ After saving, clicking **"Sync PMS"** on the Reservations page will pull data fr
 | **CREATE** | `lib/pms/qloapps-adapter.ts`                  | QloApps adapter implementing `PMSAdapter`    |
 | **CREATE** | `lib/pms/registry.ts`                         | Dynamic registry to load `QloAppsAdapter`    |
 | **MODIFY** | `components/settings/pms/pms-config-form.tsx` | Add "qloapps" to provider dropdown           |
-| **MODIFY** | `lib/pms/sync-action.ts`                      | Use dynamic registry initialization          |
+| **MODIFY** | `app/api/cron/pms-sync/route.ts`              | Use dynamic registry initialization          |
 | **MODIFY** | `lib/pms/config.ts`                           | Allow "qloapps" in Server Action validation  |
 | **CREATE** | `supabase/migrations/XXXX_add_qloapps.sql`    | Add `'qloapps'` to pms_type CHECK constraint |
 | **MODIFY** | `.env.local.example`                          | _(Optional)_ Add `QLOAPPS_BASE_URL` note     |

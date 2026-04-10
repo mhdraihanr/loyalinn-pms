@@ -140,10 +140,23 @@ CREATE TABLE message_templates (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   trigger TEXT NOT NULL CHECK (trigger IN ('pre-arrival', 'on-stay', 'post-stay')),
-  content TEXT NOT NULL,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tenant_id, trigger)
+);
+
+-- ============================================================
+-- MESSAGE TEMPLATE VARIANTS
+-- ============================================================
+CREATE TABLE message_template_variants (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  template_id UUID NOT NULL REFERENCES message_templates(id) ON DELETE CASCADE,
+  language_code TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(template_id, language_code)
 );
 
 -- ============================================================
@@ -155,10 +168,15 @@ CREATE TABLE message_logs (
   reservation_id UUID REFERENCES reservations(id) ON DELETE SET NULL,
   guest_id UUID REFERENCES guests(id) ON DELETE SET NULL,
   template_id UUID REFERENCES message_templates(id) ON DELETE SET NULL,
+  trigger_type TEXT,
+  template_language_code TEXT,
   phone TEXT NOT NULL,
   content TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed', 'retrying')),
   error_message TEXT,
+  automation_job_id UUID,
+  provider_message_id TEXT,
+  provider_response JSONB,
   sent_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -171,11 +189,19 @@ CREATE TABLE inbound_events (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   event_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
   event_type TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'qloapps',
+  signature_valid BOOLEAN,
   payload JSONB NOT NULL,
+  payload_hash TEXT NOT NULL,
   processed BOOLEAN DEFAULT false,
+  received_at TIMESTAMPTZ DEFAULT NOW(),
+  processed_at TIMESTAMPTZ,
+  processing_error TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(tenant_id, event_id)
+  UNIQUE(tenant_id, event_id),
+  UNIQUE(tenant_id, idempotency_key)
 );
 
 -- ============================================================
@@ -186,16 +212,56 @@ CREATE TABLE automation_jobs (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   reservation_id UUID REFERENCES reservations(id) ON DELETE CASCADE,
   job_type TEXT NOT NULL,
+  trigger_type TEXT NOT NULL DEFAULT 'system',
   status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'dead-letter')),
   payload JSONB NOT NULL,
   retry_count INTEGER DEFAULT 0,
   max_retries INTEGER DEFAULT 3,
   error_message TEXT,
   scheduled_at TIMESTAMPTZ,
+  available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_at TIMESTAMPTZ,
+  locked_by TEXT,
+  last_error_category TEXT,
+  message_log_id UUID REFERENCES message_logs(id) ON DELETE SET NULL,
   processed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE message_logs
+  ADD CONSTRAINT message_logs_automation_job_id_fkey
+  FOREIGN KEY (automation_job_id) REFERENCES automation_jobs(id) ON DELETE SET NULL;
+
+CREATE OR REPLACE FUNCTION public.claim_automation_jobs(
+  p_batch_size INTEGER,
+  p_worker_id TEXT
+)
+RETURNS SETOF automation_jobs
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  RETURN QUERY
+  WITH next_jobs AS (
+    SELECT id
+    FROM automation_jobs
+    WHERE status = 'pending'
+      AND available_at <= NOW()
+    ORDER BY available_at ASC, created_at ASC
+    LIMIT GREATEST(COALESCE(p_batch_size, 0), 0)
+    FOR UPDATE SKIP LOCKED
+  )
+  UPDATE automation_jobs AS jobs
+  SET status = 'processing',
+      locked_at = NOW(),
+      locked_by = p_worker_id,
+      updated_at = NOW()
+  FROM next_jobs
+  WHERE jobs.id = next_jobs.id
+  RETURNING jobs.*;
+END;
+$$;
 
 -- ============================================================
 -- ROW LEVEL SECURITY
@@ -210,6 +276,7 @@ ALTER TABLE reservations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE room_service_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE housekeeping_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE message_template_variants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbound_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE automation_jobs ENABLE ROW LEVEL SECURITY;
@@ -298,6 +365,14 @@ CREATE POLICY "Members can manage housekeeping requests" ON housekeeping_request
 CREATE POLICY "Members can manage templates" ON message_templates
   FOR ALL USING (tenant_id = public.get_user_tenant_id());
 
+-- MESSAGE TEMPLATE VARIANTS: all members can manage
+CREATE POLICY "Members can manage template variants" ON message_template_variants
+  FOR ALL USING (
+    template_id IN (
+      SELECT id FROM message_templates WHERE tenant_id = public.get_user_tenant_id()
+    )
+  );
+
 -- MESSAGE LOGS: all members can view
 CREATE POLICY "Members can view message logs" ON message_logs
   FOR SELECT USING (tenant_id = public.get_user_tenant_id());
@@ -322,6 +397,13 @@ CREATE INDEX idx_room_service_tenant_id ON room_service_orders(tenant_id);
 CREATE INDEX idx_room_service_status ON room_service_orders(status);
 CREATE INDEX idx_housekeeping_tenant_id ON housekeeping_requests(tenant_id);
 CREATE INDEX idx_housekeeping_status ON housekeeping_requests(status);
+CREATE INDEX idx_message_template_variants_template_id ON message_template_variants(template_id);
 CREATE INDEX idx_message_logs_tenant_id ON message_logs(tenant_id);
+CREATE INDEX idx_message_logs_trigger_type ON message_logs(trigger_type);
+CREATE INDEX idx_message_logs_automation_job_id ON message_logs(automation_job_id);
+CREATE INDEX idx_message_logs_status ON message_logs(status);
 CREATE INDEX idx_inbound_events_event_id ON inbound_events(event_id);
+CREATE INDEX idx_inbound_events_tenant_idempotency_key ON inbound_events(tenant_id, idempotency_key);
 CREATE INDEX idx_automation_jobs_status ON automation_jobs(status);
+CREATE INDEX idx_automation_jobs_status_available_at ON automation_jobs(status, available_at);
+CREATE INDEX idx_automation_jobs_tenant_status_available_at ON automation_jobs(tenant_id, status, available_at);

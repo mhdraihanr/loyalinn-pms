@@ -3,6 +3,7 @@ import { getCurrentUserTenant } from "@/lib/auth/tenant";
 import { getGuests } from "@/lib/data/guests";
 import { Card, Title, Stack, Text, Group } from "@mantine/core";
 import { GuestsTable } from "@/components/guests/guests-table";
+import { PageAutoRefresh } from "@/components/layout/page-auto-refresh";
 
 export default async function GuestsPage() {
   const userTenant = await getCurrentUserTenant();
@@ -12,19 +13,21 @@ export default async function GuestsPage() {
   const guests = await getGuests(userTenant.tenantId);
 
   return (
-    <Stack gap="xl">
-      <Group justify="space-between" align="center">
-        <Stack gap={2}>
-          <Title order={2}>Guests</Title>
-          <Text c="dimmed" size="sm">
-            {guests.length} guest{guests.length !== 1 ? "s" : ""} total
-          </Text>
-        </Stack>
-      </Group>
+    <PageAutoRefresh intervalMs={10_000}>
+      <Stack gap="xl">
+        <Group justify="space-between" align="center">
+          <Stack gap={2}>
+            <Title order={2}>Guests</Title>
+            <Text c="dimmed" size="sm">
+              {guests.length} guest{guests.length !== 1 ? "s" : ""} total
+            </Text>
+          </Stack>
+        </Group>
 
-      <Card withBorder radius="md" padding="lg">
-        <GuestsTable guests={guests} />
-      </Card>
-    </Stack>
+        <Card withBorder radius="md" padding="lg">
+          <GuestsTable guests={guests} />
+        </Card>
+      </Stack>
+    </PageAutoRefresh>
   );
 }

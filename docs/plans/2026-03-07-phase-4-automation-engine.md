@@ -1,16 +1,31 @@
 # Phase 4 Automation Engine Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task in the current session.
 
-**Goal:** Build a reliable Phase 4 automation pipeline that ingests QloApps webhook events, deduplicates them, queues asynchronous jobs, sends WhatsApp messages through WAHA, and records retryable delivery state.
+**Goal:** Build a reliable Phase 4 automation pipeline that ingests QloApps webhook events, deduplicates them, queues asynchronous jobs, sends WhatsApp messages through WAHA, schedules pre-arrival and post-stay automation, supports AI follow-up workflows, and exposes operational requests to staff.
 
-**Architecture:** The webhook route stays thin and only verifies, normalizes, deduplicates, and enqueues work. A cron-triggered worker claims jobs from Postgres using `FOR UPDATE SKIP LOCKED`, resolves eligible message triggers, sends through WAHA, and updates `message_logs`, `automation_jobs`, and `inbound_events` deterministically.
+**Architecture:** The webhook route stays thin and only verifies, normalizes, deduplicates, and enqueues work. A cron-triggered worker claims jobs from Postgres using `FOR UPDATE SKIP LOCKED`, while a scheduler module determines which pre-arrival and post-stay jobs should exist. The reliable messaging core lands first, followed by post-stay AI follow-up, on-stay AI tools, and the operations dashboard.
 
 **Tech Stack:** Next.js App Router, TypeScript, Supabase Postgres, WAHA, structured logging, ESLint.
 
+**Status Summary (2026-03-07):**
+
+- Complete through Task 8.
+- Verified in `supabase/migrations/`:
+  - `20260307123000_add_phase4_automation_metadata.sql`
+  - `20260307160000_add_claim_automation_jobs_function.sql`
+- Verified in `lib/automation/`:
+  - `idempotency.ts`, `types.ts`, `retry-policy.ts`, `queue.ts`, `template-renderer.ts`, `qloapps-normalizer.ts`, `status-trigger.ts`, `scheduler.ts`
+- Related development support now also exists outside the strict Task 1-8 scope:
+  - `lib/pms/auto-sync-service.ts` upserts polled guest and reservation data, emits polling-driven `inbound_events`, and enqueues immediate automation jobs for valid `on-stay` transitions.
+  - `lib/pms/pms-sync-cron.ts` uses a `-30/+30` day polling window for PMS auto-sync.
+  - `lib/pms/dev-sync-scheduler.ts` runs development-only PMS sync every 10 seconds.
+  - `components/layout/page-auto-refresh.tsx` refreshes the Reservations and Guests dashboard pages every 10 seconds so background sync changes become visible without manual reload.
+- Tasks 9-13 remain pending.
+
 ---
 
-### Task 1: Add Phase 4 schema migration
+- [x] **Task 1: Add Phase 4 schema migration** (Complete)
 
 **Files:**
 
@@ -41,13 +56,13 @@ Confirm defaults and nullable columns do not break existing inserts from current
 Run the local migration command or perform the project’s existing migration workflow.
 Expected: migration applies cleanly with no SQL errors.
 
-**Step 5: Commit**
+**Step 5: Checkpoint**
 
-Commit message: `feat: extend schema for phase 4 automation pipeline`
+Confirm the migration file and `schema.sql` stay aligned before moving to the next task.
 
 ---
 
-### Task 2: Add automation domain types and pure helpers
+- [x] **Task 2: Add automation domain types and pure helpers** (Complete)
 
 **Files:**
 
@@ -82,13 +97,13 @@ Add:
 Run the test again.
 Expected: PASS.
 
-**Step 5: Commit**
+**Step 5: Checkpoint**
 
-Commit message: `feat: add automation idempotency helpers`
+Confirm helper APIs are stable enough for webhook ingestion and scheduler use.
 
 ---
 
-### Task 3: Add retry policy with pure tests
+- [x] **Task 3: Add retry policy with pure tests** (Complete)
 
 **Files:**
 
@@ -119,13 +134,13 @@ Implement pure functions such as:
 
 Expected: PASS.
 
-**Step 5: Commit**
+**Step 5: Checkpoint**
 
-Commit message: `feat: add automation retry policy`
+Confirm retry policy outputs are deterministic and match the accepted design.
 
 ---
 
-### Task 4: Add queue claim and lifecycle helpers
+- [x] **Task 4: Add queue claim and lifecycle helpers** (Complete)
 
 **Files:**
 
@@ -161,13 +176,13 @@ Use `createAdminClient()` so background work is independent of RLS.
 
 Expected: PASS.
 
-**Step 5: Commit**
+**Step 5: Checkpoint**
 
-Commit message: `feat: add postgres-backed automation queue helpers`
+Confirm the queue helper API supports both webhook-driven jobs and scheduler-driven jobs.
 
 ---
 
-### Task 5: Add template rendering and delivery guards
+- [x] **Task 5: Add template rendering and delivery guards** (Complete)
 
 **Files:**
 
@@ -199,13 +214,13 @@ Implement:
 
 Expected: PASS.
 
-**Step 5: Commit**
+**Step 5: Checkpoint**
 
-Commit message: `feat: add automation template rendering guards`
+Confirm rendering and delivery guards are reusable by both automation and AI-assisted flows.
 
 ---
 
-### Task 6: Implement PMS webhook ingestion route
+- [x] **Task 6: Implement PMS webhook ingestion route** (Complete)
 
 **Files:**
 
@@ -241,13 +256,13 @@ Implement route logic to:
 
 Expected: PASS.
 
-**Step 5: Commit**
+**Step 5: Checkpoint**
 
-Commit message: `feat: add pms webhook ingestion route`
+Confirm duplicate ingestion is blocked without suppressing legitimate status changes.
 
 ---
 
-### Task 7: Implement status-trigger orchestration
+- [x] **Task 7: Implement status-trigger orchestration** (Complete)
 
 **Files:**
 
@@ -282,18 +297,20 @@ Implement a function that:
 
 Expected: PASS.
 
-**Step 5: Commit**
+**Step 5: Checkpoint**
 
-Commit message: `feat: add status trigger orchestration`
+Confirm `on-stay` behavior only fires on the first valid transition and that send state is recorded correctly.
 
 ---
 
-### Task 8: Implement cron automation worker route
+- [x] **Task 8: Implement scheduler module and cron automation worker route** (Complete)
 
 **Files:**
 
 - Create: `app/api/cron/automation/route.ts`
+- Create: `lib/automation/scheduler.ts`
 - Test: `tests/integration/app/api/cron/automation/route.test.ts`
+- Test: `tests/integration/lib/automation/scheduler.test.ts`
 
 **Step 1: Write the failing integration test**
 
@@ -311,11 +328,12 @@ Expected: FAIL because cron route does not exist.
 
 **Step 3: Write minimal implementation**
 
-Implement route logic to:
+Implement route and scheduler logic to:
 
 - validate cron secret
 - find reservations eligible for `pre-arrival` and `post-stay`
 - enqueue missing jobs idempotently
+- mark post-stay feedback follow-up candidates as pending where needed
 - claim due jobs
 - process them through `status-trigger.ts`
 - return a structured batch summary
@@ -324,51 +342,127 @@ Implement route logic to:
 
 Expected: PASS.
 
-**Step 5: Commit**
+**Step 5: Checkpoint**
 
-Commit message: `feat: add cron-driven automation worker`
+Confirm scheduled jobs are created once per eligible reservation and trigger.
 
 ---
 
-### Task 9: Implement manual send API skeleton
+### Task 9: Implement post-stay AI follow-up orchestration
 
 **Files:**
 
-- Create: `app/api/messages/send/route.ts`
-- Test: `tests/integration/app/api/messages/send/route.test.ts`
+- Create: `lib/ai/agent.ts`
+- Test: `tests/integration/lib/ai/agent.test.ts`
 
 **Step 1: Write the failing integration test**
 
 Cover:
 
-- only authenticated tenant members can enqueue manual sends
-- invalid reservation or guest references are rejected
-- a valid manual send request creates a queued job
+- follow-up only starts for reservations whose post-stay feedback remains pending past the timeout window
+- guest and reservation context are loaded before the AI call
+- structured feedback updates reservation fields consistently
 
 **Step 2: Run test to verify it fails**
 
-Expected: FAIL because route does not exist.
+Expected: FAIL because agent orchestration does not exist.
 
 **Step 3: Write minimal implementation**
 
-Implement route logic that:
+Implement orchestration that:
 
-- validates tenant access
-- resolves reservation and guest
-- enqueues a `manual-send` automation job
-- returns a success response with job metadata
+- resolves eligible pending post-stay follow-up candidates
+- prepares contextual prompt input from guest and reservation history
+- writes structured feedback back into reservation records through a narrow update API
 
 **Step 4: Run test to verify it passes**
 
 Expected: PASS.
 
-**Step 5: Commit**
+**Step 5: Checkpoint**
 
-Commit message: `feat: add manual message send api`
+Confirm follow-up only activates after the reliable message path and pending-state checks succeed.
 
 ---
 
-### Task 10: Update operational documentation
+### Task 10: Implement on-stay AI agent and tools
+
+**Files:**
+
+- Create: `lib/ai/on-stay-agent.ts`
+- Create: `lib/ai/tools.ts`
+- Test: `tests/integration/lib/ai/on-stay-agent.test.ts`
+
+**Step 1: Write the failing integration test**
+
+Cover:
+
+- room service requests create `room_service_orders`
+- housekeeping requests create `housekeeping_requests`
+- unsupported or ambiguous requests escalate cleanly
+
+**Step 2: Run test to verify it fails**
+
+Expected: FAIL because the on-stay agent and tools do not exist.
+
+**Step 3: Write minimal implementation**
+
+Implement:
+
+- request classification for room service, housekeeping, and concierge
+- tool functions that insert operational records safely
+- escalation behavior for requests the automation should not fulfill directly
+
+**Step 4: Run test to verify it passes**
+
+Expected: PASS.
+
+**Step 5: Checkpoint**
+
+Confirm all created operational records remain tenant-safe and tied to the active reservation when available.
+
+---
+
+### Task 11: Implement operations dashboard
+
+**Files:**
+
+- Create: `app/(dashboard)/operations/page.tsx`
+- Create: `components/operations/housekeeping-table.tsx`
+- Create: `components/operations/room-service-table.tsx`
+- Test: `tests/integration/app/(dashboard)/operations/page.test.tsx`
+
+**Step 1: Write the failing integration test**
+
+Cover:
+
+- staff can view housekeeping and room service requests for their tenant
+- status update actions are restricted to tenant members
+- records created by AI flows appear in the dashboard tables
+
+**Step 2: Run test to verify it fails**
+
+Expected: FAIL because the dashboard files do not exist.
+
+**Step 3: Write minimal implementation**
+
+Implement:
+
+- a dashboard page under the operations section
+- housekeeping and room service tables
+- status update actions for operational records
+
+**Step 4: Run test to verify it passes**
+
+Expected: PASS.
+
+**Step 5: Checkpoint**
+
+Confirm the dashboard reflects the AI-generated operational workflow without introducing cross-tenant access.
+
+---
+
+### Task 12: Update operational documentation
 
 **Files:**
 
@@ -391,13 +485,13 @@ Document rollback and operational notes for the new Phase 4 migration.
 
 Check that new route paths and job states match code.
 
-**Step 4: Commit**
+**Step 4: Checkpoint**
 
-Commit message: `docs: add phase 4 automation operations notes`
+Confirm runbook steps match the final routes, job states, and AI-assisted workflows.
 
 ---
 
-### Task 11: Full verification pass
+### Task 13: Full verification pass
 
 **Files:**
 
@@ -421,12 +515,15 @@ Exercise:
 - cron worker processing
 - WAHA mocked success path
 - duplicate webhook path
+- post-stay pending follow-up path
+- on-stay AI request creation path
+- operations dashboard visibility path
 
 Expected: one message send, one completed job, no duplicate sends.
 
-**Step 4: Commit final verification changes**
+**Step 4: Checkpoint**
 
-Commit message: `test: verify phase 4 automation flow`
+Summarize verification output and any remaining known gaps without creating a commit.
 
 ---
 
@@ -437,6 +534,7 @@ Commit message: `test: verify phase 4 automation flow`
 - Reuse `createAdminClient()` for all background database writes
 - Do not add external queue infrastructure for MVP
 - Keep batch processing small at first, for example 10 jobs per cron run
+- Do not create git commits unless the user explicitly asks for one
 
 ## Suggested test tooling decision
 
@@ -451,6 +549,9 @@ If the repository does not yet have a test runner, add the smallest viable TypeS
 5. template guards
 6. webhook route
 7. status-trigger orchestration
-8. cron route
-9. manual send API
-10. docs and verification
+8. scheduler and cron route
+9. post-stay AI follow-up
+10. on-stay AI tools
+11. operations dashboard
+12. docs
+13. verification

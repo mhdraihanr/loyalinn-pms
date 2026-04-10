@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   Textarea,
@@ -47,6 +47,14 @@ export function TemplateForm({
       : [{ language_code: "en", content: "" }],
   );
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (initialVariants.length > 0) {
+      setVariants(initialVariants);
+    } else {
+      setVariants([{ language_code: "en", content: "" }]);
+    }
+  }, [initialVariants]);
 
   const handleContentChange = (index: number, content: string) => {
     const newVariants = [...variants];
@@ -118,10 +126,11 @@ export function TemplateForm({
         color: "green",
         icon: <IconCheck size={16} />,
       });
-    } catch (error: any) {
+    } catch (error) {
       notifications.show({
         title: "Error",
-        message: error.message || "Failed to save templates.",
+        message:
+          error instanceof Error ? error.message : "Failed to save templates.",
         color: "red",
       });
     } finally {

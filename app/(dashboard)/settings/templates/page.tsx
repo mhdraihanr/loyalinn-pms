@@ -19,8 +19,7 @@ export default async function TemplatesPage() {
     .eq("tenant_id", userTenant.tenantId);
 
   const getVariantsForTrigger = (trigger: string): TemplateVariant[] => {
-    // Note: Due to the UNIQUE trigger_event, we just find the first match
-    const t = templates?.find((t: any) => t.trigger === trigger);
+    const t = templates?.find((t) => t.trigger === trigger);
     return t?.message_template_variants || [];
   };
 
