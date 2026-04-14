@@ -9,6 +9,7 @@ type RenderVariables = {
   checkInDate: string;
   checkOutDate: string;
   hotelName: string;
+  feedbackLink: string;
 };
 
 type SendGuardInput = {
@@ -30,6 +31,7 @@ const TEMPLATE_VARIABLES: Record<keyof RenderVariables, string> = {
   checkInDate: "{{checkInDate}}",
   checkOutDate: "{{checkOutDate}}",
   hotelName: "{{hotelName}}",
+  feedbackLink: "{{feedbackLink}}",
 };
 
 export function renderTemplate(

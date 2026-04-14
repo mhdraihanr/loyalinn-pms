@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { enqueueScheduledAutomationJobs } from "@/lib/automation/scheduler";
 import { runAutomationCron } from "@/lib/automation/automation-cron";
 
 export async function POST(request: Request) {
@@ -36,6 +35,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       preArrivalEnqueued: processingResult.preArrivalEnqueued,
       postStayEnqueued: processingResult.postStayEnqueued,
+      aiFollowupEscalated: processingResult.aiFollowupEscalated,
       processed: processingResult.processed,
       deadLettered: processingResult.deadLettered,
       success: true,

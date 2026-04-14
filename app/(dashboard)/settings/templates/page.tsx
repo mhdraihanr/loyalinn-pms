@@ -27,6 +27,7 @@ export default async function TemplatesPage() {
     "pre-arrival": getVariantsForTrigger("pre-arrival"),
     "on-stay": getVariantsForTrigger("on-stay"),
     "post-stay": getVariantsForTrigger("post-stay"),
+    "post-stay-ai-followup": getVariantsForTrigger("post-stay-ai-followup"),
   };
 
   async function saveTemplates(

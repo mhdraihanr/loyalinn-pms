@@ -650,7 +650,8 @@ Current Status (2026-03-07):
 - ✅ Reliable delivery core is complete through webhook ingestion, status-trigger orchestration, queue/retry handling, and cron-driven scheduler execution.
 - ✅ Phase 4 schema support is in place via `20260307123000_add_phase4_automation_metadata.sql` and `20260307160000_add_claim_automation_jobs_function.sql`.
 - ✅ PMS polling now feeds the automation pipeline through `lib/pms/auto-sync-service.ts`, `lib/pms/pms-sync-cron.ts`, and the development-only scheduler in `lib/pms/dev-sync-scheduler.ts`.
-- 🚧 Post-stay AI follow-up orchestration is not implemented yet.
+- ✅ Post-stay AI follow-up orchestration now includes 24-hour automatic escalation (`pending` -> `ai_followup`) with template-driven follow-up messages.
+- ✅ Tenant-scoped AI Assistant settings are implemented (`/settings/ai`) and injected into post-stay follow-up system prompt (`hotel_name`, `ai_name`, `tone_of_voice`, `custom_instructions`).
 - 🚧 On-stay AI tooling and the Operations dashboard are not implemented yet.
 
 Implemented files tracked for Phase 4 to date (Tasks 1-8):
@@ -658,6 +659,9 @@ Implemented files tracked for Phase 4 to date (Tasks 1-8):
 - Database and migrations:
   - `supabase/migrations/20260307123000_add_phase4_automation_metadata.sql`
   - `supabase/migrations/20260307160000_add_claim_automation_jobs_function.sql`
+  - `supabase/migrations/20260412001000_add_post_stay_ai_followup_template_trigger.sql`
+  - `supabase/migrations/20260412002000_add_ai_settings_table.sql`
+  - `supabase/migrations/20260412003000_add_inbound_message_dedupe_unique_index.sql`
   - `supabase/schema.sql` (updated to match migration state)
 - Automation core:
   - `lib/automation/types.ts`
@@ -672,12 +676,26 @@ Implemented files tracked for Phase 4 to date (Tasks 1-8):
   - `app/api/webhooks/pms/route.ts`
   - `app/api/cron/automation/route.ts`
   - `app/api/cron/pms-sync/route.ts`
+  - `app/api/webhooks/waha/route.ts`
   - `lib/pms/auto-sync-service.ts`
   - `lib/pms/pms-sync-cron.ts`
   - `lib/pms/dev-sync-scheduler.ts`
   - `instrumentation.ts`
 - UI support for development visibility:
   - `components/layout/page-auto-refresh.tsx`
+- Post-stay feedback flow and monitoring:
+  - `lib/automation/feedback-link.ts`
+  - `app/feedback/[token]/page.tsx`
+  - `components/feedback/post-stay-feedback-form.tsx`
+  - `app/api/feedback/submit/route.ts`
+  - `lib/data/feedback.ts`
+  - `app/(dashboard)/feedback/page.tsx`
+  - `components/feedback/feedback-monitor-table.tsx`
+- AI settings management for follow-up prompt personalization:
+  - `app/(dashboard)/settings/ai/page.tsx`
+  - `components/settings/ai/ai-settings-form.tsx`
+  - `lib/ai/settings.ts`
+  - `lib/ai/agent.ts` (prompt builder now merges tenant AI settings)
 
 ### Task 4.1: PMS webhook endpoint ✅
 
@@ -728,7 +746,7 @@ Policy:
 - Max attempts then dead-letter state
 - Retry only for retryable failures
 
-### Task 4.4: Scheduled trigger runner & Post-Stay AI Follow-Up 🚧 PARTIALLY COMPLETE
+### Task 4.4: Scheduled trigger runner & Post-Stay AI Follow-Up ✅ COMPLETE
 
 Files:
 
@@ -742,6 +760,19 @@ Files:
 - Create: a-proposal2/components/layout/page-auto-refresh.tsx
 - Create: a-proposal2/components/settings/developer-time-machine.tsx
 - Create: a-proposal2/lib/ai/agent.ts (Moved from Phase 6 MVP to handle follow-ups)
+- Create: a-proposal2/lib/automation/feedback-link.ts
+- Create: a-proposal2/components/feedback/post-stay-feedback-form.tsx
+- Create: a-proposal2/app/feedback/[token]/page.tsx
+- Create: a-proposal2/app/api/feedback/submit/route.ts
+- Create: a-proposal2/lib/data/feedback.ts
+- Create: a-proposal2/app/(dashboard)/feedback/page.tsx
+- Create: a-proposal2/components/feedback/feedback-monitor-table.tsx
+- Create: a-proposal2/lib/automation/feedback-escalation.ts
+- Create: a-proposal2/supabase/migrations/20260412001000_add_post_stay_ai_followup_template_trigger.sql
+- Create: a-proposal2/supabase/migrations/20260412002000_add_ai_settings_table.sql
+- Create: a-proposal2/app/(dashboard)/settings/ai/page.tsx
+- Create: a-proposal2/components/settings/ai/ai-settings-form.tsx
+- Create: a-proposal2/lib/ai/settings.ts
 
 Current implementation status:
 
@@ -753,15 +784,23 @@ Current implementation status:
 - ✅ PMS polling is connected to automation ingestion through `lib/pms/auto-sync-service.ts`.
 - ✅ Local development startup now supports separate `DEV_PMS_SYNC_INTERVAL_MS` and `DEV_AUTOMATION_SYNC_INTERVAL_MS` intervals for the two schedulers.
 - ✅ Production scheduling is defined through `vercel.json` for `/api/cron/pms-sync` every 5 minutes and `/api/cron/automation` every minute.
-- 🚧 `lib/ai/agent.ts` for post-stay follow-up is still pending.
+- ✅ Hybrid Post-Stay Web Form flow is implemented end-to-end (signed magic link generation, public form page, submit API, and template variable support `{{feedbackLink}}`).
+- ✅ Feedback Monitor dashboard page (`/feedback`) is implemented with status cards, tenant-scoped table, and detail modal showing full comments + feedback link.
+- ✅ WAHA inbound webhook integration (`app/api/webhooks/waha/route.ts`) and `lib/ai/agent.ts` tool-calling are implemented for AI-assisted follow-up replies.
+- ✅ OpenRouter provider compatibility is hardened by forcing Chat Completions path (`openrouter.chat(AI_MODEL)`) to prevent `Invalid Responses API request` errors in WAHA AI follow-up.
+- ✅ Automatic scheduler escalation after 24 hours (`pending` -> `ai_followup`) is implemented in `lib/automation/feedback-escalation.ts`.
+- ✅ Follow-up kickoff message is now template-driven from Message Templates tab `post-stay-ai-followup` (not hardcoded).
+- ✅ Cron summary responses now expose `aiFollowupEscalated` and are validated at route level (`/api/cron/automation` and `/api/dev/scheduler`).
+- ✅ Tenant-specific AI prompt context is now configurable from dashboard `/settings/ai`, persisted in `ai_settings`, and consumed by `processGuestFeedback` to personalize AI replies.
+- ✅ Inbound WAHA dedupe is hardened with atomic DB-level unique index and webhook fallback payload hashing when provider message id is missing.
 
 Use cases:
 
 - Pre-arrival messages 1-2 days before check-in.
 - **Post-stay feedback loop (Hybrid Web-Form + AI Agent):**
-  1. H+1 after checkout: Send an automated WAHA message with a link to a "Post-Stay Feedback" Web Form. Database status `post_stay_feedback` = `pending`.
+  1. H+1 after checkout: Send an automated WAHA message with a link to a "Post-Stay Feedback" Web Form. Database status `post_stay_feedback_status` = `pending`.
   2. Scheduled trigger runs every X hours to check for `pending` status.
-  3. **Agentic Intervention:** If a guest drops off (doesn't fill the form within 24 hours), the scheduler triggers the AI Agent via WAHA.
+  3. **Agentic Intervention:** If a guest drops off (doesn't fill the form within 24 hours), the scheduler escalates status to `ai_followup` and sends a configurable AI follow-up kickoff template via WAHA.
   4. **Context Provision & Personalization:** Before chatting, the system retrieves the `guest` and `reservation` history (e.g., room booked, length of stay, total spend, past visits) and injects it into the AI's System Prompt.
   5. The AI directly chats with the guest in a highly personalized manner: _"Halo [Nama], terima kasih sudah menginap di [Tipe Kamar] selama 3 malam kemarin. Bagaimana pengalaman Anda? Apakah ada masukan untuk kami?"_
   6. **Function Calling & Summarization:** AI parses the guest's unstructured chat reply, summarizes it, and calls `update_guest_feedback(rating, comments)` to save structured data back to the database, identical to the Web Form output.
@@ -808,6 +847,7 @@ Acceptance Criteria (Phase 4):
 - ✅ Duplicate webhook payload does not send duplicate message
 - ✅ Failed sends are retried and visible in logs
 - ✅ Scheduled jobs execute in expected windows
+- ✅ Staff can monitor post-stay feedback from dashboard `/feedback`, including detail view for full comments and feedback link.
 - 🚧 Staff can view and update AI-generated requests in the Operations dashboard
 
 ---

@@ -1,8 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { escalatePendingFeedbackToAiFollowup } from "@/lib/automation/feedback-escalation";
 
 type SchedulerResult = {
   preArrivalEnqueued: number;
   postStayEnqueued: number;
+  aiFollowupEscalated: number;
 };
 
 type ScheduledReservation = {
@@ -67,10 +69,13 @@ export async function enqueueScheduledAutomationJobs(
   now = new Date(),
   options: { force?: boolean } = {},
 ): Promise<SchedulerResult> {
+  const aiFollowupEscalated = await escalatePendingFeedbackToAiFollowup(now);
+
   if (!options.force && !isSchedulingWindowOpen(now)) {
     return {
       preArrivalEnqueued: 0,
       postStayEnqueued: 0,
+      aiFollowupEscalated,
     };
   }
 
@@ -124,5 +129,6 @@ export async function enqueueScheduledAutomationJobs(
   return {
     preArrivalEnqueued,
     postStayEnqueued,
+    aiFollowupEscalated,
   };
 }

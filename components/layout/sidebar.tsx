@@ -16,6 +16,7 @@ import {
   IconLayoutDashboard,
   IconUsers,
   IconCalendarEvent,
+  IconMessage,
   IconSettings,
   IconBuildingSkyscraper,
   IconLogout,
@@ -35,6 +36,11 @@ const navGroups = [
         label: "Reservations",
         icon: IconCalendarEvent,
       },
+      {
+        href: "/feedback",
+        label: "Feedback Monitor",
+        icon: IconMessage,
+      },
     ],
   },
   {
@@ -52,6 +58,7 @@ const navGroups = [
     items: [
       { href: "/settings/pms", label: "PMS Config", icon: IconSettings },
       { href: "/settings/waha", label: "WhatsApp Connect", icon: IconSettings },
+      { href: "/settings/ai", label: "AI Assistant", icon: IconSettings },
       {
         href: "/settings/templates",
         label: "Message Templates",

@@ -11,6 +11,7 @@ interface TemplatesTabsProps {
     "pre-arrival": TemplateVariant[];
     "on-stay": TemplateVariant[];
     "post-stay": TemplateVariant[];
+    "post-stay-ai-followup": TemplateVariant[];
   };
   saveAction: (
     triggerEvent: string,
@@ -39,6 +40,9 @@ export function TemplatesTabs({
           <Tabs.Tab value="pre-arrival">Pre-Arrival</Tabs.Tab>
           <Tabs.Tab value="on-stay">On-Stay</Tabs.Tab>
           <Tabs.Tab value="post-stay">Post-Stay</Tabs.Tab>
+          <Tabs.Tab value="post-stay-ai-followup">
+            Post-Stay AI Follow-up
+          </Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="pre-arrival">
@@ -64,6 +68,15 @@ export function TemplatesTabs({
             triggerEvent="post-stay"
             initialVariants={variantsData["post-stay"]}
             description="Sent after check-out to collect feedback and reviews."
+            onSave={saveAction}
+          />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="post-stay-ai-followup">
+          <TemplateForm
+            triggerEvent="post-stay-ai-followup"
+            initialVariants={variantsData["post-stay-ai-followup"]}
+            description="Sent automatically when feedback is still pending after 24 hours to start AI chat follow-up."
             onSave={saveAction}
           />
         </Tabs.Panel>

@@ -4,6 +4,10 @@ import {
   selectTemplateVariant,
 } from "@/lib/automation/template-renderer";
 import {
+  buildFeedbackLink,
+  createFeedbackToken,
+} from "@/lib/automation/feedback-link";
+import {
   completeAutomationJob,
   deadLetterAutomationJob,
 } from "@/lib/automation/queue";
@@ -179,12 +183,23 @@ export async function processStatusTriggerJob(job: StatusTriggerJob) {
     return;
   }
 
+  const feedbackLink =
+    job.triggerType === "post-stay"
+      ? buildFeedbackLink(
+          createFeedbackToken({
+            reservationId: reservation.id,
+            tenantId: job.tenantId,
+          }),
+        )
+      : "";
+
   const content = renderTemplate(templateVariant.content, {
     guestName: guest?.name ?? "Guest",
     roomNumber: reservation.room_number ?? "-",
     checkInDate: reservation.check_in_date,
     checkOutDate: reservation.check_out_date,
     hotelName: tenant?.name ?? "Hotel",
+    feedbackLink,
   });
 
   const { data: messageLog, error: messageLogError } = await adminClient
@@ -235,6 +250,27 @@ export async function processStatusTriggerJob(job: StatusTriggerJob) {
       updateLogError.message,
     );
     return;
+  }
+
+  if (job.triggerType === "post-stay") {
+    const { error: feedbackStatusError } = await adminClient
+      .from("reservations")
+      .update({
+        post_stay_feedback_status: "pending",
+      })
+      .eq("id", reservation.id)
+      .eq("tenant_id", job.tenantId)
+      .neq("post_stay_feedback_status", "completed")
+      .neq("post_stay_feedback_status", "ignored");
+
+    if (feedbackStatusError) {
+      await deadLetterAutomationJob(
+        job.id,
+        "integration",
+        feedbackStatusError.message,
+      );
+      return;
+    }
   }
 
   await completeAutomationJob(job.id, messageLog.id);

@@ -16,12 +16,26 @@ describe("renderTemplate", () => {
         checkInDate: "2026-03-08",
         checkOutDate: "2026-03-10",
         hotelName: "Hotel Nusantara",
+        feedbackLink: "",
       },
     );
 
     expect(message).toBe(
       "Hello Rina, room 301 is ready from 2026-03-08 until 2026-03-10 at Hotel Nusantara.",
     );
+  });
+
+  it("interpolates feedback link placeholder for post-stay form", () => {
+    const message = renderTemplate("Isi formulir di {{feedbackLink}}", {
+      guestName: "Rina",
+      roomNumber: "301",
+      checkInDate: "2026-03-08",
+      checkOutDate: "2026-03-10",
+      hotelName: "Hotel Nusantara",
+      feedbackLink: "https://example.com/feedback/token",
+    });
+
+    expect(message).toBe("Isi formulir di https://example.com/feedback/token");
   });
 });
 

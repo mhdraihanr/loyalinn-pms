@@ -82,3 +82,8 @@ For high-risk migrations (data transformations, column drops):
 
 - `20240320000000_add_post_stay_feedback.sql`: Adds post-stay feedback columns to the reservations table.
 - `20240320000001_add_on_stay_requests.sql`: Creates `room_service_orders` and `housekeeping_requests` tables for On-Stay AI Agent features.
+- `20260410000000_expand_feedback_status.sql`: Expands `reservations.post_stay_feedback_status` to `not-sent|pending|ai_followup|completed|ignored`.
+- `20260410000001_expand_message_logs_direction.sql`: Adds `message_logs.direction` (`inbound|outbound`) and extends send status to include `received`.
+- `20260412001000_add_post_stay_ai_followup_template_trigger.sql`: Expands `message_templates.trigger` constraint to include `post-stay-ai-followup` for configurable AI follow-up kickoff messages.
+- `20260412002000_add_ai_settings_table.sql`: Adds tenant-scoped `ai_settings` table with RLS policies so owners can manage AI prompt context from Settings UI.
+- `20260412003000_add_inbound_message_dedupe_unique_index.sql`: Adds partial unique index on inbound post-stay `message_logs` to enforce atomic dedupe by `tenant_id + provider_message_id`.

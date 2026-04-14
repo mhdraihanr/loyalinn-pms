@@ -144,6 +144,7 @@ export function TemplateForm({
     "{{checkInDate}}",
     "{{checkOutDate}}",
     "{{hotelName}}",
+    "{{feedbackLink}}",
   ];
 
   return (

@@ -49,6 +49,7 @@ describe("runAutomationCron", () => {
     mocks.enqueueScheduledAutomationJobsMock.mockResolvedValue({
       preArrivalEnqueued: 0,
       postStayEnqueued: 0,
+      aiFollowupEscalated: 0,
     });
     mocks.claimAutomationJobsMock.mockResolvedValue([]);
     mocks.processStatusTriggerJobMock.mockResolvedValue(undefined);
@@ -66,7 +67,9 @@ describe("runAutomationCron", () => {
 
     const result = await runAutomationCron(now);
 
-    expect(mocks.enqueueScheduledAutomationJobsMock).toHaveBeenCalledWith(now);
+    expect(mocks.enqueueScheduledAutomationJobsMock).toHaveBeenCalledWith(now, {
+      force: undefined,
+    });
     expect(mocks.claimAutomationJobsMock).toHaveBeenCalledWith(
       10,
       "cron:automation",
@@ -83,6 +86,7 @@ describe("runAutomationCron", () => {
       deadLettered: 0,
       preArrivalEnqueued: 0,
       postStayEnqueued: 0,
+      aiFollowupEscalated: 0,
     });
   });
 

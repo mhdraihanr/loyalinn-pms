@@ -89,6 +89,49 @@ requestId:"abc-123" AND level:"error"
 - Reconnect WhatsApp session via QR
 - Check dead-letter queue for unrecoverable failures
 
+### WAHA Inbound AI 500 (OpenRouter Request Validation)
+
+**Symptoms:**
+
+- `POST /api/webhooks/waha` returns `500`
+- Logs show `AI_APICallError: Invalid Responses API request`
+- Provider response shows `statusCode: 400` at `https://openrouter.ai/api/v1/responses`
+
+**Actions:**
+
+1. Verify AI provider call in `lib/ai/agent.ts` uses `openrouter.chat(AI_MODEL)` (not `openrouter(AI_MODEL)`).
+2. Confirm `OPENROUTER_MODEL` has no inline comments or trailing invalid characters in `.env.local`.
+3. Temporarily set `AI_FEEDBACK_DEBUG=true` to inspect tool-calling step logs.
+4. Re-test with one reservation in `post_stay_feedback_status='ai_followup'` and a valid inbound WAHA payload.
+
+**Recovery:**
+
+- Restart service after deploying the provider-path fix.
+- Re-send webhook payload and verify route returns `200`.
+- Confirm `message_logs` stores both inbound `received` and outbound `sent` rows for the reservation.
+- If still failing, switch to another OpenRouter model with reliable tool-calling support and re-test.
+
+### AI Settings Not Applied to Replies
+
+**Symptoms:**
+
+- Balasan AI masih memakai nama hotel default meski Settings sudah diisi.
+- Simpan form AI Settings gagal dengan pesan tabel tidak tersedia.
+- Log server menampilkan error terkait relasi `ai_settings`.
+
+**Actions:**
+
+1. Pastikan migration `20260412002000_add_ai_settings_table.sql` sudah diterapkan.
+2. Verifikasi user yang mengubah settings punya role `owner` pada tenant.
+3. Cek isi tabel `ai_settings` untuk `tenant_id` terkait (pastikan kolom tidak kosong semua).
+4. Pastikan webhook WAHA memanggil AI dengan tenant context (fungsi `processGuestFeedback` menerima `tenantId`).
+
+**Recovery:**
+
+- Jalankan migration terbaru lalu simpan ulang data AI Settings dari halaman `/settings/ai`.
+- Kirim ulang pesan follow-up dari tamu untuk memicu prompt baru.
+- Aktifkan `AI_FEEDBACK_DEBUG=true` sementara untuk memeriksa step tool-calling dan ringkasan AI.
+
 ### Webhook Failures
 
 **Symptoms:**

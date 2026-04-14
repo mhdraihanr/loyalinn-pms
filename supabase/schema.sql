@@ -30,12 +30,28 @@ CREATE TABLE tenant_users (
 );
 
 -- ============================================================
+-- INVITATIONS (Staff invite flow)
+-- ============================================================
+CREATE TABLE invitations (
+  id            UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id     UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  invited_email TEXT        NOT NULL,
+  invited_by    UUID        NOT NULL REFERENCES auth.users(id),
+  token         UUID        NOT NULL DEFAULT uuid_generate_v4() UNIQUE,
+  status        TEXT        NOT NULL DEFAULT 'pending'
+                              CHECK (status IN ('pending', 'accepted', 'expired')),
+  expires_at    TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days'),
+  accepted_by   UUID        REFERENCES auth.users(id),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
 -- PMS CONFIGURATIONS
 -- ============================================================
 CREATE TABLE pms_configurations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  pms_type TEXT NOT NULL CHECK (pms_type IN ('cloudbeds', 'mews', 'custom')),
+  pms_type TEXT NOT NULL CHECK (pms_type IN ('cloudbeds', 'mews', 'qloapps', 'custom')),
   endpoint TEXT NOT NULL,
   credentials JSONB NOT NULL, -- Encrypted credentials
   is_active BOOLEAN DEFAULT true,
@@ -139,7 +155,7 @@ CREATE TABLE message_templates (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  trigger TEXT NOT NULL CHECK (trigger IN ('pre-arrival', 'on-stay', 'post-stay')),
+  trigger TEXT NOT NULL CHECK (trigger IN ('pre-arrival', 'on-stay', 'post-stay', 'post-stay-ai-followup')),
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -172,7 +188,8 @@ CREATE TABLE message_logs (
   template_language_code TEXT,
   phone TEXT NOT NULL,
   content TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed', 'retrying')),
+  direction TEXT DEFAULT 'outbound' CHECK (direction IN ('inbound', 'outbound')),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed', 'retrying', 'received')),
   error_message TEXT,
   automation_job_id UUID,
   provider_message_id TEXT,
@@ -180,6 +197,21 @@ CREATE TABLE message_logs (
   sent_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- AI SETTINGS
+-- ============================================================
+CREATE TABLE ai_settings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  hotel_name TEXT,
+  ai_name TEXT,
+  tone_of_voice TEXT,
+  custom_instructions TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(tenant_id)
 );
 
 -- ============================================================
@@ -269,6 +301,7 @@ $$;
 
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invitations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pms_configurations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE waha_configurations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guests ENABLE ROW LEVEL SECURITY;
@@ -278,6 +311,7 @@ ALTER TABLE housekeeping_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_template_variants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbound_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE automation_jobs ENABLE ROW LEVEL SECURITY;
 
@@ -331,6 +365,10 @@ CREATE POLICY "Owners can delete tenant members" ON tenant_users
 CREATE POLICY "Users can join as owner during onboarding" ON tenant_users
   FOR INSERT WITH CHECK (user_id = auth.uid() AND role = 'owner');
 
+-- INVITATIONS: owners can manage their tenant's invitations
+CREATE POLICY "Owners can manage invitations" ON invitations
+  FOR ALL USING (public.is_tenant_owner(tenant_id));
+
 -- PMS CONFIGURATIONS: all members can view, only owner can manage
 CREATE POLICY "Members can view PMS config" ON pms_configurations
   FOR SELECT USING (tenant_id = public.get_user_tenant_id());
@@ -377,6 +415,14 @@ CREATE POLICY "Members can manage template variants" ON message_template_variant
 CREATE POLICY "Members can view message logs" ON message_logs
   FOR SELECT USING (tenant_id = public.get_user_tenant_id());
 
+-- AI SETTINGS: members can view, only owner can manage
+CREATE POLICY "Members can view AI settings" ON ai_settings
+  FOR SELECT USING (tenant_id = public.get_user_tenant_id());
+
+CREATE POLICY "Owners can manage AI settings" ON ai_settings
+  FOR ALL USING (public.is_tenant_owner(tenant_id))
+  WITH CHECK (public.is_tenant_owner(tenant_id));
+
 -- INBOUND EVENTS: service role only (webhooks)
 CREATE POLICY "Service role manages inbound events" ON inbound_events
   FOR ALL USING (true);
@@ -390,6 +436,8 @@ CREATE POLICY "Service role manages automation jobs" ON automation_jobs
 -- ============================================================
 CREATE INDEX idx_tenant_users_tenant_id ON tenant_users(tenant_id);
 -- idx_tenant_users_user_id is implicit from UNIQUE constraint
+CREATE INDEX idx_invitations_token ON invitations(token);
+CREATE INDEX idx_invitations_tenant_id ON invitations(tenant_id);
 CREATE INDEX idx_guests_tenant_id ON guests(tenant_id);
 CREATE INDEX idx_reservations_tenant_id ON reservations(tenant_id);
 CREATE INDEX idx_reservations_status ON reservations(status);
@@ -402,6 +450,7 @@ CREATE INDEX idx_message_logs_tenant_id ON message_logs(tenant_id);
 CREATE INDEX idx_message_logs_trigger_type ON message_logs(trigger_type);
 CREATE INDEX idx_message_logs_automation_job_id ON message_logs(automation_job_id);
 CREATE INDEX idx_message_logs_status ON message_logs(status);
+CREATE UNIQUE INDEX idx_message_logs_inbound_post_stay_provider_message_unique ON message_logs(tenant_id, provider_message_id) WHERE direction = 'inbound' AND trigger_type = 'post-stay' AND provider_message_id IS NOT NULL;
 CREATE INDEX idx_inbound_events_event_id ON inbound_events(event_id);
 CREATE INDEX idx_inbound_events_tenant_idempotency_key ON inbound_events(tenant_id, idempotency_key);
 CREATE INDEX idx_automation_jobs_status ON automation_jobs(status);

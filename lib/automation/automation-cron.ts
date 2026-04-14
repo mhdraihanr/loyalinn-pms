@@ -76,5 +76,6 @@ export async function runAutomationCron(
     deadLettered,
     preArrivalEnqueued: scheduled.preArrivalEnqueued,
     postStayEnqueued: scheduled.postStayEnqueued,
+    aiFollowupEscalated: scheduled.aiFollowupEscalated,
   };
 }

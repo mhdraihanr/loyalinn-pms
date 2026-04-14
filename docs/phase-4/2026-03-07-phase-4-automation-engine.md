@@ -23,6 +23,15 @@
   - `components/layout/page-auto-refresh.tsx` refreshes the Reservations and Guests dashboard pages every 10 seconds so background sync changes become visible without manual reload.
 - Tasks 9-13 remain pending.
 
+**Update (2026-04-12):**
+
+- Added hybrid post-stay feedback web-form flow (`lib/automation/feedback-link.ts`, `app/feedback/[token]/page.tsx`, `app/api/feedback/submit/route.ts`).
+- Added Feedback Monitor dashboard page (`app/(dashboard)/feedback/page.tsx`, `components/feedback/feedback-monitor-table.tsx`) with detail modal for full comments and link visibility.
+- Added WAHA inbound follow-up webhook (`app/api/webhooks/waha/route.ts`) and AI tool-calling in `lib/ai/agent.ts`.
+- Added automated 24-hour escalation module (`lib/automation/feedback-escalation.ts`) from `post_stay_feedback_status='pending'` to `ai_followup`.
+- Added configurable AI follow-up template trigger `post-stay-ai-followup` (schema + migration `20260412001000_add_post_stay_ai_followup_template_trigger.sql`) to remove hardcoded kickoff message content.
+- Added route-level tests to validate `aiFollowupEscalated` summary responses on both `/api/cron/automation` and `/api/dev/scheduler`.
+
 ---
 
 - [x] **Task 1: Add Phase 4 schema migration** (Complete)

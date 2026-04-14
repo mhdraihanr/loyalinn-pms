@@ -3,6 +3,32 @@ import axios from "axios";
 const WAHA_BASE_URL = process.env.WAHA_BASE_URL;
 const WAHA_API_KEY = process.env.WAHA_API_KEY;
 
+type WahaWebhookConfig = {
+  url: string;
+  events: string[];
+  hmac?: {
+    key: string;
+  };
+  retries?: {
+    policy: "constant" | "linear" | "exponential";
+    delaySeconds: number;
+    attempts: number;
+  };
+  customHeaders?: Array<{
+    name: string;
+    value: string;
+  }>;
+};
+
+type WahaSessionConfig = {
+  webhooks?: WahaWebhookConfig[];
+};
+
+type WahaLidMapping = {
+  lid: string;
+  pn: string;
+};
+
 function normalizeWhatsAppChatId(chatId: string) {
   const trimmedChatId = chatId.trim();
 
@@ -56,6 +82,34 @@ export const wahaClient = {
     apiClient
       .post("/api/sessions/start", { name: session })
       .then((res) => res.data),
+  updateSessionConfig: async (session: string, config: WahaSessionConfig) =>
+    apiClient
+      .put(`/api/sessions/${session}`, {
+        name: session,
+        config,
+      })
+      .then((res) => res.data),
+  getLidMapping: async (
+    session: string,
+    lid: string,
+  ): Promise<WahaLidMapping | null> => {
+    const trimmedLid = lid.trim();
+    if (!trimmedLid) {
+      return null;
+    }
+
+    try {
+      return await apiClient
+        .get(`/api/${session}/lids/${encodeURIComponent(trimmedLid)}`)
+        .then((res) => res.data as WahaLidMapping);
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+
+      throw error;
+    }
+  },
   getQR: async (session: string) =>
     apiClient.get(`/api/${session}/auth/qr`).then((res) => res.data),
   logoutSession: async (session: string) =>

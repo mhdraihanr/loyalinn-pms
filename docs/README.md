@@ -39,6 +39,11 @@ PMS Integration (MVP) phase documentation including:
 - **[runbook.md](./runbook.md)** - Operational procedures and incident response playbooks
 - **[plan.md](./plan.md)** - Overall project plan with all phases
 
+### 📄 Latest Implementation Notes
+
+- **[AI Settings Design (2026-04-12)](./plans/2026-04-12-ai-settings-design.md)** - Final architecture for tenant-specific AI context injection.
+- **[AI Settings Implementation (2026-04-12)](./plans/2026-04-12-ai-settings-implementation.md)** - Execution record, delivered files, and verification summary.
+
 ### 📁 plans/
 
 Archive of implementation plans (now organized by phase folders)

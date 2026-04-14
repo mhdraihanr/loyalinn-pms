@@ -31,6 +31,7 @@ describe("GET /api/cron/automation", () => {
       deadLettered: 0,
       preArrivalEnqueued: 0,
       postStayEnqueued: 0,
+      aiFollowupEscalated: 2,
     });
 
     const response = await GET(
@@ -49,6 +50,7 @@ describe("GET /api/cron/automation", () => {
       deadLettered: 0,
       preArrivalEnqueued: 0,
       postStayEnqueued: 0,
+      aiFollowupEscalated: 2,
     });
   });
 });
