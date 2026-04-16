@@ -59,18 +59,31 @@ function detectPreferredLanguage(
   phone: string | null,
   country: string | null,
 ): string {
+  if (phone) {
+    const normalizedPhone = phone.trim();
+    const cleaned = normalizedPhone.replace(/\D/g, "");
+
+    const isIndonesianNumber =
+      normalizedPhone.startsWith("+62") ||
+      normalizedPhone.startsWith("08") ||
+      cleaned.startsWith("62") ||
+      cleaned.startsWith("08");
+
+    if (isIndonesianNumber) return "id";
+    if (normalizedPhone.startsWith("+86") || cleaned.startsWith("86"))
+      return "zh";
+    if (normalizedPhone.startsWith("+81") || cleaned.startsWith("81"))
+      return "ja";
+
+    // Explicitly avoid Indonesian fallback for non-08/+62 numbers.
+    return "en";
+  }
+
   if (country) {
     const c = country.toLowerCase().trim();
     if (c === "indonesia" || c === "id") return "id";
     if (c === "china" || c === "zh") return "zh";
     if (c === "japan" || c === "jp") return "ja";
-  }
-
-  if (phone) {
-    const cleaned = phone.replace(/\D/g, "");
-    if (cleaned.startsWith("62") || phone.trim().startsWith("0")) return "id";
-    if (cleaned.startsWith("86")) return "zh";
-    if (cleaned.startsWith("81")) return "ja";
   }
 
   return "en";

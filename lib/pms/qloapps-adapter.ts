@@ -1,5 +1,120 @@
 import { AdapterGuest, AdapterReservation, PMSAdapter } from "./adapter";
 
+type QloAppsRoomBooking = {
+  id?: string | number;
+  id_order: string | number;
+  id_room: string | number;
+  id_customer: string | number;
+  room_num?: string;
+  id_status: string | number;
+  check_in?: string;
+  check_out?: string;
+  date_from: string;
+  date_to: string;
+};
+
+type QloAppsRoomBookingsResponse = {
+  bookings?: QloAppsRoomBooking | QloAppsRoomBooking[];
+};
+
+type QloAppsOrderResponse = {
+  order?: {
+    total_paid_tax_incl?: string;
+    module?: string;
+    current_state?: string | number;
+  };
+};
+
+type QloAppsCustomer = {
+  firstname?: string;
+  lastname?: string;
+  email?: string;
+  phone?: string;
+  phone_mobile?: string;
+};
+
+type QloAppsCustomerResponse = {
+  customer?: QloAppsCustomer;
+};
+
+type QloAppsAddress = {
+  phone?: string;
+  phone_mobile?: string;
+  id_country?: string | number;
+};
+
+type QloAppsAddressesResponse = {
+  addresses?: QloAppsAddress | QloAppsAddress[];
+};
+
+type QloAppsCountryNameEntry = {
+  id?: string | number;
+  value?: string;
+};
+
+type QloAppsCountryNameNode =
+  | string
+  | QloAppsCountryNameEntry[]
+  | {
+      language?: QloAppsCountryNameEntry | QloAppsCountryNameEntry[];
+    };
+
+type QloAppsCountryResponse = {
+  country?: {
+    name?: QloAppsCountryNameNode;
+  };
+};
+
+function resolveLocalizedCountryName(
+  nameNode: QloAppsCountryNameNode | undefined,
+): string | undefined {
+  if (!nameNode) {
+    return undefined;
+  }
+
+  if (typeof nameNode === "string") {
+    const normalized = nameNode.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  const pickPreferredLanguageValue = (entries: QloAppsCountryNameEntry[]) => {
+    const normalizedEntries = entries
+      .map((entry) => {
+        const id =
+          typeof entry.id === "string" || typeof entry.id === "number"
+            ? String(entry.id)
+            : "";
+        const value = typeof entry.value === "string" ? entry.value.trim() : "";
+        return { id, value };
+      })
+      .filter((entry) => entry.value.length > 0);
+
+    return (
+      normalizedEntries.find((entry) => entry.id === "1")?.value ??
+      normalizedEntries[0]?.value
+    );
+  };
+
+  if (Array.isArray(nameNode)) {
+    return pickPreferredLanguageValue(nameNode);
+  }
+
+  if (typeof nameNode === "object" && "language" in nameNode) {
+    const rawLanguages = nameNode.language;
+    if (!rawLanguages) {
+      return undefined;
+    }
+
+    const languages = Array.isArray(rawLanguages)
+      ? rawLanguages
+      : [rawLanguages];
+
+    return pickPreferredLanguageValue(languages);
+  }
+
+  return undefined;
+}
+
 export class QloAppsAdapter implements PMSAdapter {
   private endpoint: string = "";
   private apiKey: string = "";
@@ -34,7 +149,7 @@ export class QloAppsAdapter implements PMSAdapter {
       throw new Error(`Failed to fetch room bookings: ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as QloAppsRoomBookingsResponse;
 
     // If no bookings, QloApps might return empty array or nothing
     if (!data || !data.bookings) {
@@ -42,7 +157,9 @@ export class QloAppsAdapter implements PMSAdapter {
     }
 
     const reservations: AdapterReservation[] = [];
-    let rooms = Array.isArray(data.bookings) ? data.bookings : [data.bookings];
+    let rooms: QloAppsRoomBooking[] = Array.isArray(data.bookings)
+      ? data.bookings
+      : [data.bookings];
 
     // Filter in-memory to ensure the reservation overlaps with our requested date range.
     // We check if the room's check_in date is before our endDate
@@ -54,7 +171,7 @@ export class QloAppsAdapter implements PMSAdapter {
     const startRangeStr = startDate.split("T")[0];
     const endRangeStr = endDate.split("T")[0];
 
-    rooms = rooms.filter((room: any) => {
+    rooms = rooms.filter((room) => {
       const roomCheckInStr =
         room.check_in && room.check_in !== "0000-00-00 00:00:00"
           ? room.check_in
@@ -84,9 +201,12 @@ export class QloAppsAdapter implements PMSAdapter {
           { headers: this.headers },
         );
         if (orderRes.ok) {
-          const orderData = await orderRes.json();
+          const orderData = (await orderRes.json()) as QloAppsOrderResponse;
           if (orderData && orderData.order) {
-            amount = parseFloat(orderData.order.total_paid_tax_incl);
+            const parsedAmount = Number.parseFloat(
+              orderData.order.total_paid_tax_incl ?? "0",
+            );
+            amount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
             source = orderData.order.module || "QloApps Web";
 
             // In QloApps/PrestaShop, current_state = 2 means "Payment accepted"
@@ -144,7 +264,7 @@ export class QloAppsAdapter implements PMSAdapter {
     if (!custRes.ok) {
       return null;
     }
-    const custData = await custRes.json();
+    const custData = (await custRes.json()) as QloAppsCustomerResponse;
     if (!custData || !custData.customer) {
       // Single objects use singular key
       return null;
@@ -152,22 +272,44 @@ export class QloAppsAdapter implements PMSAdapter {
 
     const customer = custData.customer;
 
-    // 2. Fetch Customer Addresses for Country (Phone is already in the Customer object)
-    let phone: string | undefined = customer.phone;
+    const pickFirstPhone = (...values: Array<unknown>) => {
+      for (const value of values) {
+        if (typeof value !== "string") {
+          continue;
+        }
+        const normalized = value.trim();
+        if (normalized.length > 0) {
+          return normalized;
+        }
+      }
+      return undefined;
+    };
+
+    // Prefer the latest phone from customers resource; addresses are fallback only.
+    let phone: string | undefined = pickFirstPhone(
+      customer.phone_mobile,
+      customer.phone,
+    );
     let countryName: string | undefined = undefined;
 
     try {
       const addrRes = await fetch(
-        `${this.endpoint}/api/addresses?output_format=JSON&display=full&filter[id_customer]=[${pmsGuestId}]`,
+        `${this.endpoint}/api/addresses?output_format=JSON&display=full&filter[id_customer]=[${pmsGuestId}]&sort=[date_upd_DESC,id_DESC]&limit=1`,
         { headers: this.headers },
       );
       if (addrRes.ok) {
-        const addrData = await addrRes.json();
+        const addrData = (await addrRes.json()) as QloAppsAddressesResponse;
         if (addrData && addrData.addresses) {
           const address = Array.isArray(addrData.addresses)
             ? addrData.addresses[0]
             : addrData.addresses;
-          phone = address.phone_mobile || address.phone;
+          const addressPhone = pickFirstPhone(
+            address.phone_mobile,
+            address.phone,
+          );
+          if (!phone && addressPhone) {
+            phone = addressPhone;
+          }
 
           const countryId = address.id_country;
           if (countryId) {
@@ -178,32 +320,13 @@ export class QloAppsAdapter implements PMSAdapter {
                 { headers: this.headers },
               );
               if (countryRes.ok) {
-                const countryData = await countryRes.json();
-                if (
-                  countryData &&
-                  countryData.country &&
-                  countryData.country.name
-                ) {
-                  // The name might be an array of localized names or a single string
-                  const nameObj = countryData.country.name;
-                  if (Array.isArray(nameObj)) {
-                    countryName =
-                      nameObj.find((n: any) => n.id === "1")?.value ||
-                      nameObj[0]?.value;
-                  } else if (typeof nameObj === "string") {
-                    countryName = nameObj;
-                  } else if (typeof nameObj === "object" && nameObj.language) {
-                    // PrestaShop XML-to-JSON often formats it like: { language: [{ id: "1", value: "Indonesia" }] }
-                    const langs = Array.isArray(nameObj.language)
-                      ? nameObj.language
-                      : [nameObj.language];
-                    countryName =
-                      langs.find((l: any) => l?.id === "1")?.value ||
-                      langs[0]?.value;
-                  } else {
-                    // Safe fallback just stringify
-                    countryName = String(nameObj);
-                  }
+                const countryData =
+                  (await countryRes.json()) as QloAppsCountryResponse;
+                const resolvedCountryName = resolveLocalizedCountryName(
+                  countryData.country?.name,
+                );
+                if (resolvedCountryName) {
+                  countryName = resolvedCountryName;
                 }
               }
             } catch (ce) {
@@ -219,10 +342,17 @@ export class QloAppsAdapter implements PMSAdapter {
       console.warn(`Could not fetch address for customer ${pmsGuestId}`, e);
     }
 
+    const firstName =
+      typeof customer.firstname === "string" ? customer.firstname : "";
+    const lastName =
+      typeof customer.lastname === "string" ? customer.lastname : "";
+    const email =
+      typeof customer.email === "string" ? customer.email : undefined;
+
     return {
       pms_guest_id: pmsGuestId,
-      name: `${customer.firstname} ${customer.lastname}`.trim(),
-      email: customer.email,
+      name: `${firstName} ${lastName}`.trim(),
+      email,
       phone: phone,
       country: countryName,
     };

@@ -298,8 +298,11 @@ The adapter will:
 1. **`init(credentials, endpoint)`** — Store the API Key and the base URL (e.g., `http://localhost:8080`)
 2. **`pullReservations(startDate, endDate)`** — Fetch from `/api/room_bookings?output_format=JSON&display=full`. Note: Native PrestaShop date ranges break the QloApps room array structure. Therefore, the adapter must fetch the full list, extract the JSON object natively via `data.bookings` (NOT `data.room_bookings`), and use native Typescript `.filter()` logic to check if `roomIn <= endDate` and `roomOut >= startDate` to ensure check-in/check-out overlap. Map `room_num`, `id_status`, `check_in`, and `country` directly.
 3. **`pullOrders(orderId)`** — For each `id_order` in `room_bookings`, fetch `/api/orders/{id_order}?output_format=JSON` to map the **total booking price** (`total_paid_tax_incl`) and `source`. **Crucially**, we also check `current_state`. If the parent order's `current_state` is not `2` ("Payment accepted"), we skip the room booking entirely.
-4. **`pullGuest(pmsGuestId)`** — Fetch from `/api/customers/{id}?output_format=JSON` (do **NOT** use `display=full` here or the API will strip the data and wrap it in a list) to get identity/phone from `data.customer`. Then, fetch `/api/addresses` to get the `id_country`, and fetch `/api/countries/{id_country}` to map a human-readable `country` string to `AdapterGuest`.
-5. **`mapStatus(pmsStatus)`** — Map QloApps `id_status` to internal statuses using the table above.
+4. **`pullGuest(pmsGuestId)`** — Fetch from `/api/customers/{id}?output_format=JSON` (do **NOT** use `display=full` here or the API will strip the data and wrap it in a list) and treat `data.customer.phone` / `data.customer.phone_mobile` as the primary phone source. Address phone must be fallback only. For fallback reads, query addresses with list parameters so only the newest row is used, for example:
+
+- `/api/addresses?output_format=JSON&filter[id_customer]=[CUSTOMER_ID]&display=[phone,phone_mobile,id_country,date_upd,id]&sort=[date_upd_DESC,id_DESC]&limit=1`
+
+Then resolve `id_country` via `/api/countries/{id_country}` to map a human-readable `country` string to `AdapterGuest`. 5. **`mapStatus(pmsStatus)`** — Map QloApps `id_status` to internal statuses using the table above.
 
 ### How Authentication Works
 

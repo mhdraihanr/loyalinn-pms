@@ -41,8 +41,9 @@ PMS Integration (MVP) phase documentation including:
 
 ### 📄 Latest Implementation Notes
 
-- **[AI Settings Design (2026-04-12)](./plans/2026-04-12-ai-settings-design.md)** - Final architecture for tenant-specific AI context injection.
-- **[AI Settings Implementation (2026-04-12)](./plans/2026-04-12-ai-settings-implementation.md)** - Execution record, delivered files, and verification summary.
+- **[Automation Worker Fixes & Tools (2026-04-09)](./phase-4/2026-04-09-automation-worker-fixes-and-tools.md)** - Reliability fixes, idempotency, and latest hardening notes.
+- **[AI Settings Design (2026-04-12)](./phase-4/2026-04-12-ai-settings-design.md)** - Final architecture for tenant-specific AI context injection.
+- **[AI Settings Implementation (2026-04-12)](./phase-4/2026-04-12-ai-settings-implementation.md)** - Execution record, delivered files, and verification summary.
 
 ### 📁 plans/
 

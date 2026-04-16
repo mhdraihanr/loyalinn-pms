@@ -645,13 +645,17 @@ Acceptance Criteria (Phase 3):
 
 ## Phase 4: Automation Engine (Reliable Delivery) 🚧 IN PROGRESS
 
-Current Status (2026-03-07):
+Current Status (2026-04-16):
 
 - ✅ Reliable delivery core is complete through webhook ingestion, status-trigger orchestration, queue/retry handling, and cron-driven scheduler execution.
 - ✅ Phase 4 schema support is in place via `20260307123000_add_phase4_automation_metadata.sql` and `20260307160000_add_claim_automation_jobs_function.sql`.
 - ✅ PMS polling now feeds the automation pipeline through `lib/pms/auto-sync-service.ts`, `lib/pms/pms-sync-cron.ts`, and the development-only scheduler in `lib/pms/dev-sync-scheduler.ts`.
 - ✅ Post-stay AI follow-up orchestration now includes 24-hour automatic escalation (`pending` -> `ai_followup`) with template-driven follow-up messages.
 - ✅ Tenant-scoped AI Assistant settings are implemented (`/settings/ai`) and injected into post-stay follow-up system prompt (`hotel_name`, `ai_name`, `tone_of_voice`, `custom_instructions`).
+- ✅ Language routing is now hardened across automation + AI follow-up: Indonesian is only used for Indonesia-pattern numbers (`08`, `+62`, `62`), while non-ID numbers default to English.
+- ✅ WAHA post-stay handoff replies (`completed`, `ignored`) now use deterministic built-in bilingual templates in webhook logic (no env dependency).
+- ✅ QloApps guest phone resolution now prioritizes `customers` resource phone values and only falls back to the latest `addresses` record.
+- ✅ Task 4.4 is implemented end-to-end and currently verified by focused automated tests (see Verification Snapshot under Task 4.4).
 - 🚧 On-stay AI tooling and the Operations dashboard are not implemented yet.
 
 Implemented files tracked for Phase 4 to date (Tasks 1-8):
@@ -746,7 +750,7 @@ Policy:
 - Max attempts then dead-letter state
 - Retry only for retryable failures
 
-### Task 4.4: Scheduled trigger runner & Post-Stay AI Follow-Up ✅ COMPLETE
+### Task 4.4: Scheduled trigger runner & Post-Stay AI Follow-Up ✅ COMPLETED (Verified 2026-04-16)
 
 Files:
 
@@ -793,6 +797,19 @@ Current implementation status:
 - ✅ Cron summary responses now expose `aiFollowupEscalated` and are validated at route level (`/api/cron/automation` and `/api/dev/scheduler`).
 - ✅ Tenant-specific AI prompt context is now configurable from dashboard `/settings/ai`, persisted in `ai_settings`, and consumed by `processGuestFeedback` to personalize AI replies.
 - ✅ Inbound WAHA dedupe is hardened with atomic DB-level unique index and webhook fallback payload hashing when provider message id is missing.
+- ✅ AI + automation language policy now consistently uses phone-based detection (`08` / `+62` / `62` => `id`, others => `en`) for status-trigger sends, escalation kickoff, and agentic follow-up chat.
+- ✅ Webhook handoff fallback responses for `completed`/`ignored` are now built-in deterministic templates per language (`id`/`en`) and no longer rely on environment variables.
+- ✅ QloApps adapter phone mapping now prefers `customer.phone`/`customer.phone_mobile`; address phone is used only as fallback from the latest address row.
+
+Verification Snapshot (2026-04-16):
+
+- Command: `pnpm test tests/integration/app/api/cron/automation/route.test.ts tests/integration/app/api/dev/scheduler/route.test.ts tests/integration/lib/automation/scheduler.test.ts tests/integration/lib/automation/status-trigger.test.ts tests/unit/lib/automation/automation-cron.test.ts tests/unit/lib/automation/feedback-escalation.test.ts tests/integration/app/api/feedback/submit/route.test.ts tests/integration/app/api/webhooks/waha/route.test.ts`
+- Result: `8` test files passed, `33` tests passed, `0` failed.
+
+Additional Verification Snapshot (2026-04-16, language + handoff hardening):
+
+- Command: `pnpm test tests/integration/app/api/webhooks/waha/route.test.ts tests/unit/lib/ai/agent.test.ts tests/unit/lib/automation/feedback-escalation.test.ts`
+- Result: `3` test files passed, `20` tests passed, `0` failed.
 
 Use cases:
 

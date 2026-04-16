@@ -233,4 +233,104 @@ describe("processStatusTriggerJob", () => {
       "No template variant available for trigger",
     );
   });
+
+  it("uses English template for non 08/+62 numbers even when guest country is Indonesia", async () => {
+    mocks.reservationMaybeSingleMock.mockResolvedValue({
+      data: {
+        ...baseReservation,
+        guests: {
+          ...baseReservation.guests,
+          phone: "+12025550123",
+          country: "Indonesia",
+        },
+      },
+      error: null,
+    });
+    mocks.templateMaybeSingleMock.mockResolvedValue({
+      data: {
+        id: "template-2",
+        message_template_variants: [
+          {
+            language_code: "id",
+            content:
+              "Halo {{guestName}}, kamar {{roomNumber}} siap di {{hotelName}}.",
+          },
+          {
+            language_code: "en",
+            content:
+              "Hello {{guestName}}, room {{roomNumber}} is ready at {{hotelName}}.",
+          },
+        ],
+      },
+      error: null,
+    });
+
+    await processStatusTriggerJob({
+      id: "job-5",
+      tenantId: "tenant-1",
+      triggerType: "on-stay",
+      payload: {
+        booking_id: "BKG-1001",
+        status: "on-stay",
+        previous_status: "pre-arrival",
+        updated_at: "2026-03-07T12:00:00Z",
+      },
+    });
+
+    expect(mocks.sendMessageMock).toHaveBeenCalledWith(
+      "default",
+      "+12025550123",
+      "Hello Rina, room 301 is ready at Hotel Nusantara.",
+    );
+  });
+
+  it("uses Indonesian template for +62 numbers when available", async () => {
+    mocks.reservationMaybeSingleMock.mockResolvedValue({
+      data: {
+        ...baseReservation,
+        guests: {
+          ...baseReservation.guests,
+          phone: "+628123456789",
+          country: "United States",
+        },
+      },
+      error: null,
+    });
+    mocks.templateMaybeSingleMock.mockResolvedValue({
+      data: {
+        id: "template-3",
+        message_template_variants: [
+          {
+            language_code: "id",
+            content:
+              "Halo {{guestName}}, kamar {{roomNumber}} siap di {{hotelName}}.",
+          },
+          {
+            language_code: "en",
+            content:
+              "Hello {{guestName}}, room {{roomNumber}} is ready at {{hotelName}}.",
+          },
+        ],
+      },
+      error: null,
+    });
+
+    await processStatusTriggerJob({
+      id: "job-6",
+      tenantId: "tenant-1",
+      triggerType: "on-stay",
+      payload: {
+        booking_id: "BKG-1001",
+        status: "on-stay",
+        previous_status: "pre-arrival",
+        updated_at: "2026-03-07T12:00:00Z",
+      },
+    });
+
+    expect(mocks.sendMessageMock).toHaveBeenCalledWith(
+      "default",
+      "+628123456789",
+      "Halo Rina, kamar 301 siap di Hotel Nusantara.",
+    );
+  });
 });

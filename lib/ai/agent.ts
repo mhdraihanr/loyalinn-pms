@@ -12,6 +12,8 @@ type AiSettingsPromptContext = {
   custom_instructions: string | null;
 };
 
+type FeedbackLanguage = "id" | "en";
+
 function getLatestUserText(messageHistory: ModelMessage[]) {
   for (let i = messageHistory.length - 1; i >= 0; i -= 1) {
     const message = messageHistory[i];
@@ -34,6 +36,12 @@ function normalizePromptText(value: string | null | undefined) {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeFeedbackLanguage(
+  value: string | undefined,
+): FeedbackLanguage {
+  return value === "en" ? "en" : "id";
 }
 
 async function getTenantAiSettingsPromptContext(
@@ -68,11 +76,14 @@ export function buildGuestFeedbackSystemPrompt({
   guestName,
   hotelName,
   aiSettings,
+  preferredLanguage = "id",
 }: {
   guestName: string;
   hotelName: string;
   aiSettings: AiSettingsPromptContext | null;
+  preferredLanguage?: FeedbackLanguage;
 }) {
+  const resolvedLanguage = normalizeFeedbackLanguage(preferredLanguage);
   const resolvedHotelName =
     normalizePromptText(aiSettings?.hotel_name) ??
     normalizePromptText(hotelName) ??
@@ -87,17 +98,38 @@ export function buildGuestFeedbackSystemPrompt({
   const optionalContext: string[] = [];
 
   if (preferredTone) {
-    optionalContext.push(`Preferensi tone: ${preferredTone}.`);
+    optionalContext.push(
+      resolvedLanguage === "en"
+        ? `Preferred tone: ${preferredTone}.`
+        : `Preferensi tone: ${preferredTone}.`,
+    );
   }
 
   if (customInstructions) {
     optionalContext.push(
-      `Instruksi tambahan dari hotel:\n${customInstructions}`,
+      resolvedLanguage === "en"
+        ? `Additional hotel instructions:\n${customInstructions}`
+        : `Instruksi tambahan dari hotel:\n${customInstructions}`,
     );
   }
 
   const optionalBlock =
     optionalContext.length > 0 ? `\n\n${optionalContext.join("\n")}` : "";
+
+  if (resolvedLanguage === "en") {
+    return `You are ${resolvedAiName}, the Front Desk and Guest Relations AI for hotel "${resolvedHotelName}".
+You are assisting a guest named "${guestName}".
+Your main task is to ask about the guest's post-stay experience and collect feedback that includes:
+1. A numeric rating from 1 to 5.
+2. A text comment explaining the rating.
+
+AI rules:
+- Use warm, polite, professional English.
+- Keep responses concise. If the guest has not provided a rating, ask directly for a 1-5 score.
+- If the guest provides a rating (1, 2, 3, 4, or 5) OR provides complete feedback comments, immediately call the \`update_guest_feedback\` tool.
+- If the guest refuses to provide feedback or asks to stop follow-up, call the \`ignore_feedback\` tool.
+- After a successful tool call, end the conversation with a brief thank-you message.${optionalBlock}`;
+  }
 
   return `Anda adalah ${resolvedAiName}, resepsionis dan Guest Relation AI untuk hotel "${resolvedHotelName}".
 Anda sedang menangani tamu dengan nama "${guestName}".
@@ -119,14 +151,62 @@ export async function processGuestFeedback(
   guestName: string,
   hotelName: string,
   messageHistory: ModelMessage[],
+  preferredLanguage: FeedbackLanguage = "id",
 ) {
   const supabase = await createAdminClient();
+  const resolvedLanguage = normalizeFeedbackLanguage(preferredLanguage);
   const aiSettings = await getTenantAiSettingsPromptContext(supabase, tenantId);
   const systemPrompt = buildGuestFeedbackSystemPrompt({
     guestName,
     hotelName,
     aiSettings,
+    preferredLanguage: resolvedLanguage,
   });
+
+  const copy =
+    resolvedLanguage === "en"
+      ? {
+          updateDescription:
+            "Store guest feedback with a numeric rating (1 to 5) and free-text comments extracted from the conversation.",
+          ratingDescription:
+            "Numeric score from 1 to 5 for guest satisfaction.",
+          commentsDescription:
+            "Guest's free-text comments, explanation, or suggestions.",
+          updateSuccess: (rating: number, comments: string) =>
+            `SYSTEM_INFO: Feedback saved successfully (Rating: ${rating}, Comments: \"${comments}\"). Please close with a short thank-you message.`,
+          updateFailed: (reason: string) =>
+            `SYSTEM_INFO: Failed to save feedback in database. Reason: ${reason}`,
+          ignoreDescription:
+            "Close the follow-up when the guest refuses feedback or asks to stop being contacted.",
+          ignoreReasonDescription:
+            "Specific reason why the guest declined to provide feedback.",
+          ignoreStoredReasonPrefix: "[Declined Feedback] Reason:",
+          ignoreSuccess:
+            "SYSTEM_INFO: Status updated to 'ignored'. Please apologize briefly for the interruption and close politely.",
+          ignoreFailed: (reason: string) =>
+            `SYSTEM_INFO: Failed to update ignored status. Reason: ${reason}`,
+        }
+      : {
+          updateDescription:
+            "Menyimpan hasil rating (wajib berupa angka 1 sampai 5) dan komentar feedback dari tamu yang sudah didapatkan dari percakapan.",
+          ratingDescription:
+            "Angka numerik (1, 2, 3, 4, atau 5) sebagai point kepuasan dari sang tamu.",
+          commentsDescription:
+            "Teks komentar, opini, atau saran bebas yang dituliskan oleh tamu.",
+          updateSuccess: (rating: number, comments: string) =>
+            `INFO_SISTEM: Berhasil menyimpan feedback (Rating: ${rating}, Komentar: \"${comments}\"). Silakan beri pesan penutup dan terima kasih kepada tamu.`,
+          updateFailed: (reason: string) =>
+            `INFO_SISTEM: Gagal menyimpan data di database. Alasan: ${reason}`,
+          ignoreDescription:
+            "Menutup percakapan jika tamu menolak di-follow up, risih, atau eksplisit meminta kita berhenti bertanya.",
+          ignoreReasonDescription:
+            'Alasan spesifik kenapa tamu menolak untuk memberikan feedback (misalnya "Sedang sibuk", "Saya tidak mau diganggu")',
+          ignoreStoredReasonPrefix: "[Declined Feedback] Alasan:",
+          ignoreSuccess:
+            "INFO_SISTEM: Sukses update status menjadi 'ignored'. Mohon ucapkan permohonan maaf telah mengganggu dan ucapan selamat beraktivitas kembali kepada tamu!",
+          ignoreFailed: (reason: string) =>
+            `INFO_SISTEM: Gagal eksekusi. Alasan: ${reason}`,
+        };
 
   const result = await generateText({
     // OpenRouter + AI SDK v6 default model route can use Responses API.
@@ -149,21 +229,14 @@ export async function processGuestFeedback(
     tools: {
       // 1. Tool untuk mengumpulkan feedback
       update_guest_feedback: tool({
-        description:
-          "Menyimpan hasil rating (wajib berupa angka 1 sampai 5) dan komentar feedback dari tamu yang sudah didapatkan dari percakapan.",
+        description: copy.updateDescription,
         inputSchema: z.object({
           rating: z.coerce
             .number()
             .min(1)
             .max(5)
-            .describe(
-              "Angka numerik (1, 2, 3, 4, atau 5) sebagai point kepuasan dari sang tamu.",
-            ),
-          comments: z
-            .string()
-            .describe(
-              "Teks komentar, opini, atau saran bebas yang dituliskan oleh tamu.",
-            ),
+            .describe(copy.ratingDescription),
+          comments: z.string().describe(copy.commentsDescription),
         }),
         execute: async ({ rating, comments }) => {
           try {
@@ -177,25 +250,20 @@ export async function processGuestFeedback(
               .eq("id", reservationId);
 
             if (error) throw error;
-            return `INFO_SISTEM: Berhasil menyimpan feedback (Rating: ${rating}, Komentar: "${comments}"). Silakan beri pesan penutup dan terima kasih kepada tamu.`;
+            return copy.updateSuccess(rating, comments);
           } catch (e: unknown) {
             console.error("Error saving feedback via AI Tool:", e);
             const reason = e instanceof Error ? e.message : "Unknown error";
-            return `INFO_SISTEM: Gagal menyimpan data di database. Alasan: ${reason}`;
+            return copy.updateFailed(reason);
           }
         },
       }),
 
       // 2. Tool jika tamu menolak direngkuh
       ignore_feedback: tool({
-        description:
-          "Menutup percakapan jika tamu menolak di-follow up, risih, atau eksplisit meminta kita berhenti bertanya.",
+        description: copy.ignoreDescription,
         inputSchema: z.object({
-          reason: z
-            .string()
-            .describe(
-              'Alasan spesifik kenapa tamu menolak untuk memberikan feedback (misalnya "Sedang sibuk", "Saya tidak mau diganggu")',
-            ),
+          reason: z.string().describe(copy.ignoreReasonDescription),
         }),
         execute: async ({ reason }) => {
           try {
@@ -203,16 +271,16 @@ export async function processGuestFeedback(
               .from("reservations")
               .update({
                 post_stay_feedback_status: "ignored",
-                post_stay_comments: `[Declined Feedback] Alasan: ${reason}`,
+                post_stay_comments: `${copy.ignoreStoredReasonPrefix} ${reason}`,
               })
               .eq("id", reservationId);
 
             if (error) throw error;
-            return `INFO_SISTEM: Sukses update status menjadi 'ignored'. Mohon ucapkan permohonan maaf telah mengganggu dan ucapan selamat beraktivitas kembali kepada tamu!`;
+            return copy.ignoreSuccess;
           } catch (e: unknown) {
             console.error("Error ignoring feedback via AI Tool:", e);
             const reason = e instanceof Error ? e.message : "Unknown error";
-            return `INFO_SISTEM: Gagal eksekusi. Alasan: ${reason}`;
+            return copy.ignoreFailed(reason);
           }
         },
       }),

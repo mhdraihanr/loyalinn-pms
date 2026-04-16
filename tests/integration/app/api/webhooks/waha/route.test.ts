@@ -163,6 +163,7 @@ describe("POST /api/webhooks/waha", () => {
           content: "Halo, saya mau kasih rating",
         },
       ],
+      "id",
     );
     expect(mocks.sendMessageMock).toHaveBeenCalledWith(
       "default",
@@ -306,6 +307,63 @@ describe("POST /api/webhooks/waha", () => {
       "Rina",
       "Hotel Nusantara",
       expect.any(Array),
+      "id",
+    );
+  });
+
+  it("uses English for non-ID phone in agentic chat and completed handoff fallback", async () => {
+    mocks.reservationSingleMock.mockResolvedValueOnce({
+      data: {
+        id: "reservation-3",
+        tenant_id: "tenant-1",
+        guest_id: "guest-1",
+        guests: [{ name: "Rina", phone: "+12025550123" }],
+        tenants: [{ name: "Hotel Nusantara" }],
+      },
+      error: null,
+    });
+
+    mocks.reservationStatusMaybeSingleMock.mockResolvedValueOnce({
+      data: {
+        post_stay_feedback_status: "completed",
+      },
+      error: null,
+    });
+
+    const response = await POST(
+      new NextRequest("http://localhost/api/webhooks/waha", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-waha-secret": "waha-secret",
+        },
+        body: JSON.stringify({
+          event: "message.any",
+          payload: {
+            from: "+12025550123@c.us",
+            body: "Thanks, all good",
+            fromMe: false,
+            isGroup: false,
+            timestamp: 1_775_000_140,
+            id: { id: "wamid-non-id-en" },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.processGuestFeedbackMock).toHaveBeenCalledWith(
+      "reservation-3",
+      "tenant-1",
+      "Rina",
+      "Hotel Nusantara",
+      expect.any(Array),
+      "en",
+    );
+    expect(mocks.sendMessageMock).toHaveBeenCalledWith(
+      "default",
+      "+12025550123@c.us",
+      "Thank you Rina, your feedback has been forwarded to the Hotel Nusantara team. For any follow-up, our hotel staff will contact you manually if needed.",
     );
   });
 
@@ -390,10 +448,7 @@ describe("POST /api/webhooks/waha", () => {
     expect(mocks.sendMessageMock).not.toHaveBeenCalled();
   });
 
-  it("uses completed-feedback handoff template when reservation is completed", async () => {
-    process.env.AI_FEEDBACK_COMPLETED_HANDOFF_TEMPLATE =
-      "Terima kasih {{guestName}}, feedback Anda sudah kami teruskan ke tim {{hotelName}}. Untuk tindak lanjut, tim hotel akan menghubungi manual.";
-
+  it("uses built-in completed handoff reply when reservation is completed", async () => {
     mocks.reservationStatusMaybeSingleMock.mockResolvedValueOnce({
       data: {
         post_stay_feedback_status: "completed",
@@ -426,7 +481,7 @@ describe("POST /api/webhooks/waha", () => {
     expect(mocks.sendMessageMock).toHaveBeenCalledWith(
       "default",
       "628123456789@c.us",
-      "Terima kasih Rina, feedback Anda sudah kami teruskan ke tim Hotel Nusantara. Untuk tindak lanjut, tim hotel akan menghubungi manual.",
+      "Terima kasih Rina, feedback Anda sudah kami teruskan ke tim Hotel Nusantara. Untuk tindak lanjut, tim hotel akan menghubungi Anda secara manual jika diperlukan.",
     );
   });
 

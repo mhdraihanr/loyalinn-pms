@@ -33,4 +33,16 @@ describe("buildGuestFeedbackSystemPrompt", () => {
     expect(prompt).toContain('hotel "Hotel Nusantara"');
     expect(prompt).not.toContain("Instruksi tambahan dari hotel");
   });
+
+  it("uses English instructions when preferred language is non-ID", () => {
+    const prompt = buildGuestFeedbackSystemPrompt({
+      guestName: "Rina",
+      hotelName: "Hotel Nusantara",
+      aiSettings: null,
+      preferredLanguage: "en",
+    } as unknown as Parameters<typeof buildGuestFeedbackSystemPrompt>[0]);
+
+    expect(prompt).toContain("Use warm, polite, professional English");
+    expect(prompt).not.toContain("Gunakan bahasa Indonesia");
+  });
 });

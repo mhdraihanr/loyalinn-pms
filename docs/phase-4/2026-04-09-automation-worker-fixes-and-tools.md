@@ -71,3 +71,42 @@
 - **Validation**:
   - `tests/integration/app/api/webhooks/waha/route.test.ts` (now 14 passing tests) correctly asserts idempotency checks and LID lookups.
   - Live testing confirmed that duplicate webhook payloads skip processing and the target status accurately completes.
+
+## 11. QloApps Guest Phone Source Hardening (Customer First)
+
+- **Problem**: Some guest phone numbers were stale because address data could override newer customer profile numbers.
+- **Solution**:
+  - In `lib/pms/qloapps-adapter.ts`, phone resolution now prefers `customer.phone` / `customer.phone_mobile` first.
+  - Address phone is now fallback-only, and it is fetched from the newest address row with deterministic ordering.
+  - Adapter parsing was typed to remove explicit `any` and reduce runtime ambiguity.
+- **Validation**:
+  - `tests/unit/lib/pms/qloapps-adapter.test.ts`
+  - Covers customer-phone precedence and address fallback behavior.
+
+## 12. Language Routing Policy (Non-ID => English)
+
+- **Problem**: Non-Indonesia numbers could still receive Indonesian copy in automation and AI follow-up paths.
+- **Solution**:
+  - Language detection now uses phone pattern as primary signal.
+  - Indonesian is restricted to Indonesia-style numbers (`08`, `+62`, `62`).
+  - Non-ID numbers default to English.
+- **Applied scope**:
+  - `lib/automation/status-trigger.ts`
+  - `lib/automation/feedback-escalation.ts`
+  - `app/api/webhooks/waha/route.ts`
+  - `lib/ai/agent.ts` (prompt/tool copy localized via `preferredLanguage`)
+
+## 13. WAHA Handoff Replies Decoupled from Env Templates
+
+- **Problem**: Final handoff text (`completed` / `ignored`) depended on env template overrides, which made behavior less deterministic across environments.
+- **Solution**:
+  - Handoff replies are now resolved from built-in bilingual templates in `app/api/webhooks/waha/route.ts`.
+  - `preferredLanguage` drives deterministic ID/EN fallback copy.
+  - Environment variables are no longer required for handoff default behavior.
+- **Validation**:
+  - `tests/integration/app/api/webhooks/waha/route.test.ts` now verifies built-in completed handoff response.
+
+## 14. Context7 References Used in This Hardening Pass
+
+- **PrestaShop docs** (`/prestashop/docs`): confirmed supported list query parameters (`filter`, `sort`, `limit`) for robust latest-address fallback reads.
+- **Vercel AI SDK docs** (`/vercel/ai`): reconfirmed guidance that system prompts + deterministic settings are recommended for reliable tool-calling flows.

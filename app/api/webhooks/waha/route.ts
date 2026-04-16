@@ -17,6 +17,29 @@ const RESERVATION_LOOKUP_SELECT = `
 
 const SUPPORTED_HMAC_ALGORITHMS = new Set(["sha256", "sha512"]);
 
+type FeedbackLanguage = "id" | "en";
+
+const HANDOFF_REPLY_TEMPLATES: Record<
+  FeedbackLanguage,
+  {
+    completed: string;
+    ignored: string;
+  }
+> = {
+  id: {
+    completed:
+      "Terima kasih {{guestName}}, feedback Anda sudah kami teruskan ke tim {{hotelName}}. Untuk tindak lanjut, tim hotel akan menghubungi Anda secara manual jika diperlukan.",
+    ignored:
+      "Baik {{guestName}}, kami tidak akan melanjutkan follow-up otomatis. Jika Anda membutuhkan bantuan, silakan hubungi tim {{hotelName}}.",
+  },
+  en: {
+    completed:
+      "Thank you {{guestName}}, your feedback has been forwarded to the {{hotelName}} team. For any follow-up, our hotel staff will contact you manually if needed.",
+    ignored:
+      "Understood {{guestName}}, we will stop this automated follow-up. If you need anything, please contact the {{hotelName}} team.",
+  },
+};
+
 function parseBooleanLike(value: unknown) {
   if (typeof value === "boolean") {
     return value;
@@ -431,6 +454,31 @@ function buildPhoneLookupCandidates(chatId: string) {
   return Array.from(candidates).filter((candidate) => candidate.length >= 8);
 }
 
+function isIndonesianPhoneNumber(phone: string | null | undefined) {
+  if (!phone) {
+    return false;
+  }
+
+  const normalized = phone.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  const digits = normalized.replace(/\D/g, "");
+  return (
+    normalized.startsWith("+62") ||
+    normalized.startsWith("08") ||
+    digits.startsWith("62") ||
+    digits.startsWith("08")
+  );
+}
+
+function detectFeedbackLanguageByPhone(
+  phone: string | null | undefined,
+): FeedbackLanguage {
+  return isIndonesianPhoneNumber(phone) ? "id" : "en";
+}
+
 function isNotFoundError(error: { code?: string; message?: string } | null) {
   if (!error) {
     return false;
@@ -495,21 +543,19 @@ function resolveCompletedFeedbackReply(params: {
   feedbackStatus: string | null;
   guestName: string;
   hotelName: string;
+  preferredLanguage: FeedbackLanguage;
 }) {
-  const { feedbackStatus, guestName, hotelName } = params;
+  const { feedbackStatus, guestName, hotelName, preferredLanguage } = params;
+  const selectedTemplates = HANDOFF_REPLY_TEMPLATES[preferredLanguage];
 
   if (feedbackStatus === "completed") {
-    const template =
-      process.env.AI_FEEDBACK_COMPLETED_HANDOFF_TEMPLATE ||
-      "Terima kasih {{guestName}}, feedback Anda sudah kami teruskan ke tim {{hotelName}}. Untuk tindak lanjut, tim hotel akan menghubungi Anda secara manual jika diperlukan.";
+    const template = selectedTemplates.completed;
 
     return renderHandoffTemplate(template, { guestName, hotelName });
   }
 
   if (feedbackStatus === "ignored") {
-    const template =
-      process.env.AI_FEEDBACK_IGNORED_REPLY_TEMPLATE ||
-      "Baik {{guestName}}, kami tidak akan melanjutkan follow-up otomatis. Jika Anda membutuhkan bantuan, silakan hubungi tim {{hotelName}}.";
+    const template = selectedTemplates.ignored;
 
     return renderHandoffTemplate(template, { guestName, hotelName });
   }
@@ -676,6 +722,9 @@ export async function POST(req: NextRequest) {
 
     const guestName = reservation.guests?.[0]?.name ?? "Guest";
     const hotelName = reservation.tenants?.[0]?.name ?? "Hotel";
+    const preferredLanguage = detectFeedbackLanguageByPhone(
+      reservation.guests?.[0]?.phone ?? phone,
+    );
 
     // Konversi logs dari database ke format CoreMessage AI SDK
     const messageHistory: ModelMessage[] = (rawLogs || []).map((log) => ({
@@ -690,6 +739,7 @@ export async function POST(req: NextRequest) {
       guestName,
       hotelName,
       messageHistory,
+      preferredLanguage,
     );
 
     const latestFeedbackStatus = await getReservationFeedbackStatus(
@@ -701,6 +751,7 @@ export async function POST(req: NextRequest) {
       feedbackStatus: latestFeedbackStatus,
       guestName,
       hotelName,
+      preferredLanguage,
     });
     const replyText = handoffReply ?? aiResponse.response;
 

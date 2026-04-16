@@ -200,4 +200,50 @@ describe("escalatePendingFeedbackToAiFollowup", () => {
     expect(mocks.sendMessageMock).not.toHaveBeenCalled();
     expect(result).toBe(0);
   });
+
+  it("uses English follow-up variant for non-ID phone even when country is Indonesia", async () => {
+    mocks.reservationSelectLimitMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: "reservation-1",
+          tenant_id: "tenant-1",
+          guest_id: "guest-1",
+          guests: {
+            name: "Rina",
+            phone: "+12025550123",
+            country: "Indonesia",
+          },
+          tenants: { name: "Hotel Nusantara" },
+        },
+      ],
+      error: null,
+    });
+
+    mocks.templateMaybeSingleMock.mockResolvedValueOnce({
+      data: {
+        id: "template-followup-2",
+        message_template_variants: [
+          {
+            language_code: "id",
+            content: "Halo {{guestName}}, follow-up dari {{hotelName}}.",
+          },
+          {
+            language_code: "en",
+            content:
+              "Hello {{guestName}}, this is a follow-up from {{hotelName}}.",
+          },
+        ],
+      },
+      error: null,
+    });
+
+    const result = await escalatePendingFeedbackToAiFollowup(now);
+
+    expect(mocks.sendMessageMock).toHaveBeenCalledWith(
+      "default",
+      "+12025550123",
+      "Hello Rina, this is a follow-up from Hotel Nusantara.",
+    );
+    expect(result).toBe(1);
+  });
 });

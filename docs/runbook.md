@@ -132,6 +132,31 @@ requestId:"abc-123" AND level:"error"
 - Kirim ulang pesan follow-up dari tamu untuk memicu prompt baru.
 - Aktifkan `AI_FEEDBACK_DEBUG=true` sementara untuk memeriksa step tool-calling dan ringkasan AI.
 
+### AI Follow-up Language Mismatch / Unexpected Handoff Copy
+
+**Symptoms:**
+
+- Nomor non-Indonesia menerima balasan Bahasa Indonesia.
+- Balasan handoff akhir (`completed`/`ignored`) tidak sesuai bahasa nomor tamu.
+- Tim mencoba mengubah teks handoff via env tetapi tidak ada efek.
+
+**Actions:**
+
+1. Verifikasi nomor tamu tersimpan dan ternormalisasi dengan benar (cek `guests.phone` + source PMS terbaru).
+2. Pastikan deteksi bahasa berbasis nomor berjalan pada flow terkait:
+   - `lib/automation/status-trigger.ts`
+   - `lib/automation/feedback-escalation.ts`
+   - `app/api/webhooks/waha/route.ts`
+3. Konfirmasi status reservasi saat inbound (`post_stay_feedback_status`) apakah `completed`, `ignored`, atau `ai_followup`.
+4. Jalankan tes terfokus:
+   - `pnpm test tests/integration/app/api/webhooks/waha/route.test.ts tests/unit/lib/automation/feedback-escalation.test.ts tests/unit/lib/ai/agent.test.ts`
+
+**Recovery:**
+
+- Perbaiki data nomor tamu di PMS sync jika mismatch sumber data ditemukan.
+- Untuk status `completed`/`ignored`, gunakan fallback bawaan bilingual di webhook route (tidak lagi bergantung env template).
+- Jika perlu kustom copy handoff tenant-specific, lakukan perubahan di layer konfigurasi aplikasi (bukan env global) sebelum produksi.
+
 ### Webhook Failures
 
 **Symptoms:**

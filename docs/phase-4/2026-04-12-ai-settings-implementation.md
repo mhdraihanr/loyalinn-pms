@@ -104,3 +104,31 @@ Full suite note:
 2. Login as tenant owner and configure `/settings/ai`.
 3. Trigger inbound WAHA reply for reservation in `ai_followup` state.
 4. Confirm prompt personalization is reflected in AI response.
+
+---
+
+## Addendum (2026-04-16) — Language Routing & Handoff Hardening
+
+Scope added after initial implementation record:
+
+- `processGuestFeedback` now receives `preferredLanguage` (`id`/`en`) so prompt/tool copy can stay consistent with phone-based language routing.
+- WAHA webhook flow now passes language context into AI processing and uses deterministic bilingual handoff fallback for terminal states (`completed`, `ignored`).
+- Handoff fallback no longer depends on env template variables.
+
+Related files:
+
+- `lib/ai/agent.ts`
+- `app/api/webhooks/waha/route.ts`
+- `lib/automation/feedback-escalation.ts`
+- `lib/automation/status-trigger.ts`
+
+Focused verification (passed):
+
+```bash
+pnpm test tests/integration/app/api/webhooks/waha/route.test.ts tests/unit/lib/ai/agent.test.ts tests/unit/lib/automation/feedback-escalation.test.ts
+```
+
+Result:
+
+- 3 files passed
+- 20 tests passed
