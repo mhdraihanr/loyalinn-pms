@@ -25,6 +25,32 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOutUser } from "@/lib/auth/logout";
 
+const configurationItems = [
+  { href: "/settings/pms", label: "PMS Config", icon: IconSettings },
+  { href: "/settings/waha", label: "WhatsApp Connect", icon: IconSettings },
+  { href: "/settings/ai", label: "AI Assistant", icon: IconSettings },
+  {
+    href: "/settings/templates",
+    label: "Message Templates",
+    icon: IconSettings,
+  },
+];
+
+const teamItems = [
+  { href: "/settings/team", label: "Team Management", icon: IconUsers },
+];
+
+const developerItems =
+  process.env.NODE_ENV === "development"
+    ? [
+        {
+          href: "/settings/developer",
+          label: "Dev Tools (Time Machine)",
+          icon: IconSettings,
+        },
+      ]
+    : [];
+
 const navGroups = [
   {
     label: "FRONT DESK",
@@ -48,34 +74,27 @@ const navGroups = [
     items: [
       {
         href: "/operations",
-        label: "AI Requests (Phase 4)",
+        label: "AI Requests ",
         icon: IconLayoutDashboard, // You can change this later to IconConciergeBell or similar
       },
     ],
   },
   {
-    label: "SETTINGS",
-    items: [
-      { href: "/settings/pms", label: "PMS Config", icon: IconSettings },
-      { href: "/settings/waha", label: "WhatsApp Connect", icon: IconSettings },
-      { href: "/settings/ai", label: "AI Assistant", icon: IconSettings },
-      {
-        href: "/settings/templates",
-        label: "Message Templates",
-        icon: IconSettings,
-      },
-      { href: "/settings/team", label: "Team Management", icon: IconUsers },
-      ...(process.env.NODE_ENV === "development"
-        ? [
-            {
-              href: "/settings/developer",
-              label: "Dev Tools (Time Machine)",
-              icon: IconSettings,
-            },
-          ]
-        : []),
-    ],
+    label: "CONFIGURATION",
+    items: configurationItems,
   },
+  {
+    label: "TEAM",
+    items: teamItems,
+  },
+  ...(developerItems.length > 0
+    ? [
+        {
+          label: "DEVELOPER",
+          items: developerItems,
+        },
+      ]
+    : []),
 ];
 
 export function Sidebar({ hotelName }: { hotelName: string }) {

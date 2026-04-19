@@ -311,7 +311,7 @@ describe("POST /api/webhooks/waha", () => {
     );
   });
 
-  it("uses English for non-ID phone in agentic chat and completed handoff fallback", async () => {
+  it("uses English for non-ID phone in agentic chat and keeps agentic reply when completed", async () => {
     mocks.reservationSingleMock.mockResolvedValueOnce({
       data: {
         id: "reservation-3",
@@ -328,6 +328,11 @@ describe("POST /api/webhooks/waha", () => {
         post_stay_feedback_status: "completed",
       },
       error: null,
+    });
+
+    mocks.processGuestFeedbackMock.mockResolvedValueOnce({
+      response:
+        "Thank you Rina. Your feedback is completed and our team has recorded your input.",
     });
 
     const response = await POST(
@@ -363,7 +368,7 @@ describe("POST /api/webhooks/waha", () => {
     expect(mocks.sendMessageMock).toHaveBeenCalledWith(
       "default",
       "+12025550123@c.us",
-      "Thank you Rina, your feedback has been forwarded to the Hotel Nusantara team. For any follow-up, our hotel staff will contact you manually if needed.",
+      "Thank you Rina. Your feedback is completed and our team has recorded your input.",
     );
   });
 
@@ -448,12 +453,17 @@ describe("POST /api/webhooks/waha", () => {
     expect(mocks.sendMessageMock).not.toHaveBeenCalled();
   });
 
-  it("uses built-in completed handoff reply when reservation is completed", async () => {
+  it("keeps agentic reply when reservation status is completed", async () => {
     mocks.reservationStatusMaybeSingleMock.mockResolvedValueOnce({
       data: {
         post_stay_feedback_status: "completed",
       },
       error: null,
+    });
+
+    mocks.processGuestFeedbackMock.mockResolvedValueOnce({
+      response:
+        "Terima kasih Rina. Feedback Anda sudah completed dan kami sudah mencatat semua masukan.",
     });
 
     const response = await POST(
@@ -481,7 +491,7 @@ describe("POST /api/webhooks/waha", () => {
     expect(mocks.sendMessageMock).toHaveBeenCalledWith(
       "default",
       "628123456789@c.us",
-      "Terima kasih Rina, feedback Anda sudah kami teruskan ke tim Hotel Nusantara. Untuk tindak lanjut, tim hotel akan menghubungi Anda secara manual jika diperlukan.",
+      "Terima kasih Rina. Feedback Anda sudah completed dan kami sudah mencatat semua masukan.",
     );
   });
 
@@ -608,5 +618,56 @@ describe("POST /api/webhooks/waha", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.processGuestFeedbackMock).toHaveBeenCalled();
+  });
+
+  it("falls back to deterministic reply when AI provider is temporarily rate-limited", async () => {
+    const retryError = Object.assign(new Error("Provider returned error"), {
+      name: "AI_RetryError",
+      reason: "maxRetriesExceeded",
+      lastError: {
+        statusCode: 429,
+        isRetryable: true,
+        responseBody: "rate-limited upstream",
+      },
+    });
+
+    mocks.processGuestFeedbackMock.mockRejectedValueOnce(retryError);
+
+    const response = await POST(
+      new NextRequest("http://localhost/api/webhooks/waha", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-waha-secret": "waha-secret",
+        },
+        body: JSON.stringify({
+          event: "message.any",
+          payload: {
+            from: "628123456789@c.us",
+            body: "Halo, saya mau kasih rating",
+            fromMe: false,
+            isGroup: false,
+            timestamp: 1_775_000_150,
+            id: { id: "wamid-rate-limit-fallback" },
+          },
+        }),
+      }),
+    );
+
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json).toEqual({
+      status: "success:fallback",
+      ai_reply:
+        "Terima kasih Rina, pesan Anda sudah kami terima. Saat ini asisten otomatis kami sedang sangat sibuk. Tim Hotel Nusantara akan menindaklanjuti Anda secara manual sesegera mungkin.",
+      fallback: true,
+    });
+    expect(mocks.sendMessageMock).toHaveBeenCalledWith(
+      "default",
+      "628123456789@c.us",
+      "Terima kasih Rina, pesan Anda sudah kami terima. Saat ini asisten otomatis kami sedang sangat sibuk. Tim Hotel Nusantara akan menindaklanjuti Anda secara manual sesegera mungkin.",
+    );
+    expect(mocks.messageLogInsertMock).toHaveBeenCalledTimes(2);
   });
 });

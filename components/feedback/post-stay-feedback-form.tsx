@@ -19,6 +19,30 @@ type PostStayFeedbackFormProps = {
   hotelName: string;
 };
 
+type SubmissionCopy = {
+  pointsMessage: string;
+  redeemMessage: string;
+};
+
+export function getFeedbackSubmissionCopy(
+  rewardPoints: number,
+): SubmissionCopy {
+  if (rewardPoints > 0) {
+    return {
+      pointsMessage: `Sebagai apresiasi, Anda mendapatkan ${rewardPoints} poin reward.`,
+      redeemMessage:
+        "Poin ini bisa ditukar dengan servis seperti minuman gratis, extra bed, bahkan potongan harga menginap.",
+    };
+  }
+
+  return {
+    pointsMessage:
+      "Feedback Anda sudah kami terima dan poin reward untuk reservasi ini sudah tercatat satu kali.",
+    redeemMessage:
+      "Poin yang Anda miliki tetap bisa ditukar dengan servis seperti minuman gratis, extra bed, bahkan potongan harga menginap.",
+  };
+}
+
 export function PostStayFeedbackForm({
   token,
   guestName,
@@ -29,6 +53,7 @@ export function PostStayFeedbackForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [rewardPoints, setRewardPoints] = useState(0);
 
   const canSubmit = rating >= 1 && rating <= 5 && comments.trim().length > 0;
 
@@ -53,12 +78,19 @@ export function PostStayFeedbackForm({
         }),
       });
 
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as {
+        error?: string;
+        rewardPoints?: number;
+      };
 
       if (!response.ok) {
         throw new Error(payload.error ?? "Failed to submit feedback");
       }
 
+      const points = Number(payload.rewardPoints ?? 0);
+      setRewardPoints(
+        Number.isFinite(points) && points >= 0 ? Math.floor(points) : 0,
+      );
       setSubmitted(true);
     } catch (submitError: unknown) {
       setError(
@@ -72,6 +104,8 @@ export function PostStayFeedbackForm({
   }
 
   if (submitted) {
+    const submissionCopy = getFeedbackSubmissionCopy(rewardPoints);
+
     return (
       <Card withBorder radius="md" p="xl">
         <Stack gap="md">
@@ -79,6 +113,12 @@ export function PostStayFeedbackForm({
           <Text c="dimmed">
             Feedback Anda untuk {hotelName} sudah kami terima.
           </Text>
+          <Alert color="teal" variant="light">
+            <Stack gap={4}>
+              <Text fw={600}>{submissionCopy.pointsMessage}</Text>
+              <Text size="sm">{submissionCopy.redeemMessage}</Text>
+            </Stack>
+          </Alert>
         </Stack>
       </Card>
     );

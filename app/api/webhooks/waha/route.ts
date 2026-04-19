@@ -19,25 +19,9 @@ const SUPPORTED_HMAC_ALGORITHMS = new Set(["sha256", "sha512"]);
 
 type FeedbackLanguage = "id" | "en";
 
-const HANDOFF_REPLY_TEMPLATES: Record<
-  FeedbackLanguage,
-  {
-    completed: string;
-    ignored: string;
-  }
-> = {
-  id: {
-    completed:
-      "Terima kasih {{guestName}}, feedback Anda sudah kami teruskan ke tim {{hotelName}}. Untuk tindak lanjut, tim hotel akan menghubungi Anda secara manual jika diperlukan.",
-    ignored:
-      "Baik {{guestName}}, kami tidak akan melanjutkan follow-up otomatis. Jika Anda membutuhkan bantuan, silakan hubungi tim {{hotelName}}.",
-  },
-  en: {
-    completed:
-      "Thank you {{guestName}}, your feedback has been forwarded to the {{hotelName}} team. For any follow-up, our hotel staff will contact you manually if needed.",
-    ignored:
-      "Understood {{guestName}}, we will stop this automated follow-up. If you need anything, please contact the {{hotelName}} team.",
-  },
+const AI_PROVIDER_FAILURE_REPLY_TEMPLATES: Record<FeedbackLanguage, string> = {
+  id: "Terima kasih {{guestName}}, pesan Anda sudah kami terima. Saat ini asisten otomatis kami sedang sangat sibuk. Tim {{hotelName}} akan menindaklanjuti Anda secara manual sesegera mungkin.",
+  en: "Thank you {{guestName}}, we received your message. Our automated assistant is currently overloaded. The {{hotelName}} team will follow up with you manually as soon as possible.",
 };
 
 function parseBooleanLike(value: unknown) {
@@ -527,6 +511,44 @@ function isUniqueViolationError(
   return error.code === "23505";
 }
 
+function isRetryableAiProviderError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const errorRecord = error as Record<string, unknown>;
+  const lastError = toRecord(errorRecord.lastError);
+  const statusCodeCandidates = [errorRecord.statusCode, lastError?.statusCode]
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+
+  if (statusCodeCandidates.includes(429)) {
+    return true;
+  }
+
+  const isRetryable = parseBooleanLike(lastError?.isRetryable);
+  if (!isRetryable) {
+    return false;
+  }
+
+  const evidence = [
+    getFirstNonEmptyString([
+      errorRecord.reason,
+      errorRecord.message,
+      lastError?.message,
+      lastError?.code,
+    ]),
+    getFirstNonEmptyString([lastError?.responseBody, errorRecord.responseBody]),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return /rate\s*limit|retry|temporar|too many requests|provider returned error/i.test(
+    evidence,
+  );
+}
+
 function renderHandoffTemplate(
   template: string,
   params: {
@@ -539,54 +561,15 @@ function renderHandoffTemplate(
     .replace(/{{\s*hotelName\s*}}/gi, params.hotelName);
 }
 
-function resolveCompletedFeedbackReply(params: {
-  feedbackStatus: string | null;
+function resolveAiProviderFailureReply(params: {
   guestName: string;
   hotelName: string;
   preferredLanguage: FeedbackLanguage;
 }) {
-  const { feedbackStatus, guestName, hotelName, preferredLanguage } = params;
-  const selectedTemplates = HANDOFF_REPLY_TEMPLATES[preferredLanguage];
+  const { guestName, hotelName, preferredLanguage } = params;
+  const template = AI_PROVIDER_FAILURE_REPLY_TEMPLATES[preferredLanguage];
 
-  if (feedbackStatus === "completed") {
-    const template = selectedTemplates.completed;
-
-    return renderHandoffTemplate(template, { guestName, hotelName });
-  }
-
-  if (feedbackStatus === "ignored") {
-    const template = selectedTemplates.ignored;
-
-    return renderHandoffTemplate(template, { guestName, hotelName });
-  }
-
-  return null;
-}
-
-async function getReservationFeedbackStatus(
-  supabase: Awaited<ReturnType<typeof createAdminClient>>,
-  reservationId: string,
-  tenantId: string,
-) {
-  const { data, error } = await supabase
-    .from("reservations")
-    .select("post_stay_feedback_status")
-    .eq("id", reservationId)
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
-
-  if (error && !isNotFoundError(error)) {
-    throw new Error(
-      error.message || "Failed to read reservation feedback status",
-    );
-  }
-
-  if (!data) {
-    return null;
-  }
-
-  const rawStatus = data.post_stay_feedback_status;
-  return typeof rawStatus === "string" ? rawStatus : null;
+  return renderHandoffTemplate(template, { guestName, hotelName });
 }
 
 export async function POST(req: NextRequest) {
@@ -733,27 +716,55 @@ export async function POST(req: NextRequest) {
     }));
 
     // 5. Panggil AI Agent (Vercel AI SDK)
-    const aiResponse = await processGuestFeedback(
-      reservation.id,
-      reservation.tenant_id,
-      guestName,
-      hotelName,
-      messageHistory,
-      preferredLanguage,
-    );
+    let aiResponse: { response: string };
 
-    const latestFeedbackStatus = await getReservationFeedbackStatus(
-      supabase,
-      reservation.id,
-      reservation.tenant_id,
-    );
-    const handoffReply = resolveCompletedFeedbackReply({
-      feedbackStatus: latestFeedbackStatus,
-      guestName,
-      hotelName,
-      preferredLanguage,
-    });
-    const replyText = handoffReply ?? aiResponse.response;
+    try {
+      aiResponse = await processGuestFeedback(
+        reservation.id,
+        reservation.tenant_id,
+        guestName,
+        hotelName,
+        messageHistory,
+        preferredLanguage,
+      );
+    } catch (error: unknown) {
+      if (!isRetryableAiProviderError(error)) {
+        throw error;
+      }
+
+      const fallbackReply = resolveAiProviderFailureReply({
+        guestName,
+        hotelName,
+        preferredLanguage,
+      });
+
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn("WAHA AI retryable provider error, sending fallback reply", {
+        reservationId: reservation.id,
+        tenantId: reservation.tenant_id,
+        detail,
+      });
+
+      await wahaClient.sendMessage(session, chatId, fallbackReply);
+      await supabase.from("message_logs").insert({
+        tenant_id: reservation.tenant_id,
+        reservation_id: reservation.id,
+        guest_id: reservation.guest_id,
+        phone,
+        content: fallbackReply,
+        direction: "outbound",
+        status: "sent",
+        trigger_type: "post-stay",
+      });
+
+      return NextResponse.json({
+        status: "success:fallback",
+        ai_reply: fallbackReply,
+        fallback: true,
+      });
+    }
+
+    const replyText = aiResponse.response;
 
     if (replyText) {
       // 6. Tanggapi via WhatsApp (Kirim Pesan Keluar)

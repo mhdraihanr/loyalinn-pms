@@ -77,7 +77,7 @@ Fields exposed to owner:
 
 - If table `ai_settings` is not migrated yet, both read/write paths fail gracefully with explicit messaging.
 - AI runtime keeps webhook flow resilient by falling back to default prompt context when `ai_settings` cannot be read.
-- Prompt generation remains compatible with current tool-calling flow (`openrouter.chat(AI_MODEL)`).
+- Prompt generation remains compatible with current tool-calling flow (`aiProvider(AI_MODEL)` from `lib/ai/provider.ts`).
 
 ## 7. MCP Note
 

@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 
+import {
+  completePostStayFeedbackWithReward,
+  FEEDBACK_REWARD_POINTS,
+} from "@/lib/automation/feedback-reward";
 import { verifyFeedbackToken } from "@/lib/automation/feedback-link";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -47,7 +51,7 @@ export async function POST(request: Request) {
 
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     return NextResponse.json(
-      { error: "Rating must be an integer between 1 and 5" },
+      { error: "Rating must be between 1 and 5" },
       { status: 400 },
     );
   }
@@ -60,6 +64,7 @@ export async function POST(request: Request) {
   }
 
   const adminClient = createAdminClient();
+
   const { data: reservation, error: reservationError } = await adminClient
     .from("reservations")
     .select("id, tenant_id, guest_id, post_stay_feedback_status, guests(phone)")
@@ -74,20 +79,23 @@ export async function POST(request: Request) {
     );
   }
 
-  if (reservation.post_stay_feedback_status !== "completed") {
-    const { error: updateError } = await adminClient
-      .from("reservations")
-      .update({
-        post_stay_feedback_status: "completed",
-        post_stay_rating: rating,
-        post_stay_comments: comments,
-      })
-      .eq("id", reservation.id)
-      .eq("tenant_id", reservation.tenant_id);
+  let rewardPoints = 0;
 
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
-    }
+  try {
+    const rewardResult = await completePostStayFeedbackWithReward({
+      supabase: adminClient,
+      reservationId: reservation.id,
+      tenantId: reservation.tenant_id,
+      rating,
+      comments,
+      rewardPoints: FEEDBACK_REWARD_POINTS,
+    });
+
+    rewardPoints = rewardResult.pointsAwarded;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to save feedback";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   await adminClient.from("message_logs").insert({
@@ -102,5 +110,5 @@ export async function POST(request: Request) {
     sent_at: new Date().toISOString(),
   });
 
-  return NextResponse.json({ submitted: true });
+  return NextResponse.json({ submitted: true, rewardPoints });
 }

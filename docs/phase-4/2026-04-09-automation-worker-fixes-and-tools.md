@@ -50,11 +50,12 @@
   - `tests/integration/app/api/dev/scheduler/route.test.ts`
 - **Result**: Both production cron wrapper and development scheduler simulation now assert escalation metrics in their JSON summaries.
 
-## 8. WAHA AI Follow-up 500 Fix (OpenRouter Compatibility)
+## 8. WAHA AI Follow-up 500 Fix (Provider Path Compatibility)
 
-- **Problem**: Inbound WAHA replies for AI follow-up were returning HTTP `500` because OpenRouter rejected request payloads with `Invalid Responses API request` on `/api/v1/responses`.
-- **Root Cause**: The AI SDK provider default path used Responses API shape, while this feedback flow relies on chat-style tool-calling messages.
-- **Solution**: Force Chat Completions path in `lib/ai/agent.ts` by using `openrouter.chat(AI_MODEL)`.
+- **Problem**: Inbound WAHA replies for AI follow-up were returning HTTP `500` because provider payload routing was incompatible for tool-calling flows.
+- **Root Cause**: The AI SDK provider path at that time used a Responses API shape, while this feedback flow relies on chat-style tool-calling messages.
+- **Solution (historical patch)**: Force Chat Completions path in `lib/ai/agent.ts` using provider-specific chat invocation.
+- **Current state**: Runtime provider is now centralized in `lib/ai/provider.ts`, and `lib/ai/agent.ts` uses `aiProvider(AI_MODEL)` for Gemini-based tool-calling.
 - **Validation**:
   - `tests/integration/app/api/webhooks/waha/route.test.ts` passed (`6/6`).
   - Runtime logs no longer report the Responses API validation error once the patch is deployed.

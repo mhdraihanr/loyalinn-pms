@@ -89,27 +89,49 @@ requestId:"abc-123" AND level:"error"
 - Reconnect WhatsApp session via QR
 - Check dead-letter queue for unrecoverable failures
 
-### WAHA Inbound AI 500 (OpenRouter Request Validation)
+### WAHA Inbound AI 500 (Gemini Provider Misconfiguration)
 
 **Symptoms:**
 
 - `POST /api/webhooks/waha` returns `500`
-- Logs show `AI_APICallError: Invalid Responses API request`
-- Provider response shows `statusCode: 400` at `https://openrouter.ai/api/v1/responses`
+- Logs show `AI_APICallError` with provider failure details
+- Provider response shows `statusCode: 400/401` from Gemini API endpoint
 
 **Actions:**
 
-1. Verify AI provider call in `lib/ai/agent.ts` uses `openrouter.chat(AI_MODEL)` (not `openrouter(AI_MODEL)`).
-2. Confirm `OPENROUTER_MODEL` has no inline comments or trailing invalid characters in `.env.local`.
-3. Temporarily set `AI_FEEDBACK_DEBUG=true` to inspect tool-calling step logs.
-4. Re-test with one reservation in `post_stay_feedback_status='ai_followup'` and a valid inbound WAHA payload.
+1. Verify AI provider call in `lib/ai/agent.ts` uses `aiProvider(AI_MODEL)`.
+2. Confirm `GEMINI_API_KEY` is set and valid in `.env.local`.
+3. Confirm `GEMINI_MODEL` has no inline comments or trailing invalid characters in `.env.local`.
+4. Temporarily set `AI_FEEDBACK_DEBUG=true` to inspect tool-calling step logs.
+5. Re-test with one reservation in `post_stay_feedback_status='ai_followup'` and a valid inbound WAHA payload.
 
 **Recovery:**
 
 - Restart service after deploying the provider-path fix.
 - Re-send webhook payload and verify route returns `200`.
 - Confirm `message_logs` stores both inbound `received` and outbound `sent` rows for the reservation.
-- If still failing, switch to another OpenRouter model with reliable tool-calling support and re-test.
+- If still failing, switch to another Gemini model with reliable tool-calling support and re-test.
+
+### WAHA Inbound AI 500 (Provider Rate-Limit / 429)
+
+**Symptoms:**
+
+- `POST /api/webhooks/waha` sempat mengembalikan `500`.
+- Log menampilkan `AI_RetryError` setelah 3 percobaan (`maxRetriesExceeded`).
+- `lastError.statusCode` bernilai `429` dan response body menyebut model sedang `rate-limited upstream`.
+
+**Actions:**
+
+1. Cek model aktif pada env `GEMINI_MODEL`.
+2. Verifikasi log detail di terminal, terutama `statusCode`, `responseBody`, dan model id.
+3. Jalankan tes webhook terfokus:
+   - `pnpm test tests/integration/app/api/webhooks/waha/route.test.ts`
+4. Pastikan webhook route mengirim fallback reply deterministic (bukan 500) saat error provider retryable.
+
+**Recovery:**
+
+- Sistem kini memakai fallback otomatis untuk error AI provider retryable (termasuk 429), sehingga webhook tetap `200` dan tamu menerima pesan bahwa tim hotel akan follow-up manual.
+- Jika 429 sering berulang, pindah ke model Gemini yang lebih stabil atau tingkatkan kuota billing API key.
 
 ### AI Settings Not Applied to Replies
 
@@ -137,8 +159,8 @@ requestId:"abc-123" AND level:"error"
 **Symptoms:**
 
 - Nomor non-Indonesia menerima balasan Bahasa Indonesia.
-- Balasan handoff akhir (`completed`/`ignored`) tidak sesuai bahasa nomor tamu.
-- Tim mencoba mengubah teks handoff via env tetapi tidak ada efek.
+- Balasan saat status `completed`/`ignored` tidak sesuai bahasa nomor tamu.
+- AI memanggil update terlalu cepat ketika tamu baru kirim komentar tanpa rating angka.
 
 **Actions:**
 
@@ -150,12 +172,40 @@ requestId:"abc-123" AND level:"error"
 3. Konfirmasi status reservasi saat inbound (`post_stay_feedback_status`) apakah `completed`, `ignored`, atau `ai_followup`.
 4. Jalankan tes terfokus:
    - `pnpm test tests/integration/app/api/webhooks/waha/route.test.ts tests/unit/lib/automation/feedback-escalation.test.ts tests/unit/lib/ai/agent.test.ts`
+5. Verifikasi prompt rule di `lib/ai/agent.ts`:
+   - `update_guest_feedback` hanya boleh dipanggil jika rating numerik `1-5` sudah tersedia.
+   - Jika tamu kirim komentar dulu, AI harus meminta rating angka terlebih dahulu.
 
 **Recovery:**
 
 - Perbaiki data nomor tamu di PMS sync jika mismatch sumber data ditemukan.
-- Untuk status `completed`/`ignored`, gunakan fallback bawaan bilingual di webhook route (tidak lagi bergantung env template).
-- Jika perlu kustom copy handoff tenant-specific, lakukan perubahan di layer konfigurasi aplikasi (bukan env global) sebelum produksi.
+- Gunakan output Agentic AI sebagai balasan akhir untuk status `completed`/`ignored`; fallback deterministic hanya dipakai jika provider retryable error (misalnya 429).
+- Jika `429` sering berulang, isi `GEMINI_FALLBACK_MODEL` agar agent otomatis mencoba model cadangan sebelum masuk fallback manual.
+
+### Feedback Completed But Guest Points Not Increasing
+
+**Symptoms:**
+
+- Status feedback reservation berubah menjadi `completed`, tetapi `guests.points` tidak bertambah.
+- Response web submit feedback tidak mengembalikan `rewardPoints` sesuai ekspektasi.
+- Tim melihat potensi duplikasi poin saat feedback dikirim ulang.
+- Balasan AI follow-up tidak menyebutkan bahwa poin dapat ditukar ke benefit layanan.
+
+**Actions:**
+
+1. Pastikan migration `20260417000100_add_feedback_reward_points_function.sql` sudah diterapkan.
+2. Verifikasi fungsi RPC `complete_post_stay_feedback_with_reward` tersedia di database.
+3. Cek logs untuk error dari `app/api/feedback/submit/route.ts` atau `lib/ai/agent.ts` saat memanggil RPC.
+4. Jalankan tes terfokus:
+   - `pnpm test tests/integration/app/api/feedback/submit/route.test.ts tests/unit/lib/ai/agent.test.ts`
+5. Validasi data reservation target: `tenant_id`, `guest_id`, dan `post_stay_feedback_status`.
+6. Validasi output tool AI setelah `update_guest_feedback` memuat info penukaran poin (welcome drink, extra bed, potongan harga / room-rate discount).
+
+**Recovery:**
+
+- Terapkan migration yang belum jalan lalu ulangi submit feedback.
+- Jika status awal reservation sudah `completed`, sistem memang mengembalikan `rewardPoints: 0` (idempotent, tidak ada duplikasi poin).
+- Jika error RPC masih muncul, rollback deployment terbaru dan lakukan verifikasi schema parity antara `supabase/schema.sql` dan migration aktif.
 
 ### Webhook Failures
 

@@ -689,6 +689,7 @@ Implemented files tracked for Phase 4 to date (Tasks 1-8):
   - `components/layout/page-auto-refresh.tsx`
 - Post-stay feedback flow and monitoring:
   - `lib/automation/feedback-link.ts`
+  - `lib/automation/feedback-reward.ts`
   - `app/feedback/[token]/page.tsx`
   - `components/feedback/post-stay-feedback-form.tsx`
   - `app/api/feedback/submit/route.ts`
@@ -765,6 +766,7 @@ Files:
 - Create: a-proposal2/components/settings/developer-time-machine.tsx
 - Create: a-proposal2/lib/ai/agent.ts (Moved from Phase 6 MVP to handle follow-ups)
 - Create: a-proposal2/lib/automation/feedback-link.ts
+- Create: a-proposal2/lib/automation/feedback-reward.ts
 - Create: a-proposal2/components/feedback/post-stay-feedback-form.tsx
 - Create: a-proposal2/app/feedback/[token]/page.tsx
 - Create: a-proposal2/app/api/feedback/submit/route.ts
@@ -774,6 +776,7 @@ Files:
 - Create: a-proposal2/lib/automation/feedback-escalation.ts
 - Create: a-proposal2/supabase/migrations/20260412001000_add_post_stay_ai_followup_template_trigger.sql
 - Create: a-proposal2/supabase/migrations/20260412002000_add_ai_settings_table.sql
+- Create: a-proposal2/supabase/migrations/20260417000100_add_feedback_reward_points_function.sql
 - Create: a-proposal2/app/(dashboard)/settings/ai/page.tsx
 - Create: a-proposal2/components/settings/ai/ai-settings-form.tsx
 - Create: a-proposal2/lib/ai/settings.ts
@@ -788,17 +791,24 @@ Current implementation status:
 - ✅ PMS polling is connected to automation ingestion through `lib/pms/auto-sync-service.ts`.
 - ✅ Local development startup now supports separate `DEV_PMS_SYNC_INTERVAL_MS` and `DEV_AUTOMATION_SYNC_INTERVAL_MS` intervals for the two schedulers.
 - ✅ Production scheduling is defined through `vercel.json` for `/api/cron/pms-sync` every 5 minutes and `/api/cron/automation` every minute.
+- ✅ Completing post-stay feedback now awards loyalty points (`+50`) to the related guest exactly once via Supabase RPC `complete_post_stay_feedback_with_reward`.
+- ✅ Reward logic is shared by both web form submit route and AI feedback tool to keep behavior consistent and idempotent.
+- ✅ AI follow-up closing flow now explicitly informs guests that reward points can be redeemed for services (welcome drink, extra bed, or room-rate discount).
+- ✅ Feedback Monitor detail modal now surfaces reward status, richer feedback metadata, and quick open/copy feedback-link actions.
 - ✅ Hybrid Post-Stay Web Form flow is implemented end-to-end (signed magic link generation, public form page, submit API, and template variable support `{{feedbackLink}}`).
 - ✅ Feedback Monitor dashboard page (`/feedback`) is implemented with status cards, tenant-scoped table, and detail modal showing full comments + feedback link.
 - ✅ WAHA inbound webhook integration (`app/api/webhooks/waha/route.ts`) and `lib/ai/agent.ts` tool-calling are implemented for AI-assisted follow-up replies.
-- ✅ OpenRouter provider compatibility is hardened by forcing Chat Completions path (`openrouter.chat(AI_MODEL)`) to prevent `Invalid Responses API request` errors in WAHA AI follow-up.
+- ✅ AI provider has been migrated from OpenRouter to Gemini API via `@ai-sdk/google` (`aiProvider(AI_MODEL)`), keeping WAHA AI follow-up flow on a native provider path.
+- ✅ WAHA AI follow-up webhook now degrades gracefully on retryable provider failures (including Gemini `429`), returning deterministic fallback reply with HTTP `200` instead of propagating `500`.
+- ✅ Agent prompt now enforces numeric rating-first behavior (`1-5`) before calling `update_guest_feedback`, reducing premature tool-call attempts when guests send comments first.
+- ✅ If primary model is rate-limited and `GEMINI_FALLBACK_MODEL` is configured, AI follow-up automatically retries with fallback model before webhook-level fallback reply is used.
 - ✅ Automatic scheduler escalation after 24 hours (`pending` -> `ai_followup`) is implemented in `lib/automation/feedback-escalation.ts`.
 - ✅ Follow-up kickoff message is now template-driven from Message Templates tab `post-stay-ai-followup` (not hardcoded).
 - ✅ Cron summary responses now expose `aiFollowupEscalated` and are validated at route level (`/api/cron/automation` and `/api/dev/scheduler`).
 - ✅ Tenant-specific AI prompt context is now configurable from dashboard `/settings/ai`, persisted in `ai_settings`, and consumed by `processGuestFeedback` to personalize AI replies.
 - ✅ Inbound WAHA dedupe is hardened with atomic DB-level unique index and webhook fallback payload hashing when provider message id is missing.
 - ✅ AI + automation language policy now consistently uses phone-based detection (`08` / `+62` / `62` => `id`, others => `en`) for status-trigger sends, escalation kickoff, and agentic follow-up chat.
-- ✅ Webhook handoff fallback responses for `completed`/`ignored` are now built-in deterministic templates per language (`id`/`en`) and no longer rely on environment variables.
+- ✅ Webhook now keeps completed/ignored closing replies from Agentic AI output (language follows detected guest language), while deterministic text fallback is reserved for retryable provider failures only.
 - ✅ QloApps adapter phone mapping now prefers `customer.phone`/`customer.phone_mobile`; address phone is used only as fallback from the latest address row.
 
 Verification Snapshot (2026-04-16):

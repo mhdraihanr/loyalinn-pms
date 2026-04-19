@@ -3,16 +3,31 @@
 import { useState } from "react";
 import {
   ActionIcon,
-  Anchor,
   Badge,
   Box,
+  Button,
+  Card,
+  CopyButton,
+  Divider,
   Group,
   Modal,
+  Paper,
+  SimpleGrid,
   Stack,
   Table,
   Text,
+  ThemeIcon,
+  Tooltip,
 } from "@mantine/core";
-import { IconEye } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconCopy,
+  IconEye,
+  IconExternalLink,
+  IconGift,
+  IconMessageCircle,
+  IconStar,
+} from "@tabler/icons-react";
 
 import type { FeedbackMonitorRow } from "@/lib/data/feedback";
 
@@ -23,6 +38,8 @@ const statusColorMap: Record<FeedbackMonitorRow["feedbackStatus"], string> = {
   completed: "green",
   ignored: "red",
 };
+
+const FEEDBACK_REWARD_POINTS = 50;
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -166,55 +183,132 @@ export function FeedbackMonitorTable({ rows }: { rows: FeedbackMonitorRow[] }) {
         size="lg"
       >
         {selectedRow ? (
-          <Stack gap="md">
-            <Group justify="space-between" align="start">
-              <Stack gap={0}>
-                <Text fw={600}>{selectedRow.guestName}</Text>
-                <Text size="sm" c="dimmed">
-                  {selectedRow.guestPhone ?? "No phone"}
-                </Text>
-              </Stack>
-              <Badge
-                color={statusColorMap[selectedRow.feedbackStatus]}
-                variant="light"
-              >
-                {statusLabel(selectedRow.feedbackStatus)}
-              </Badge>
-            </Group>
+          <Stack gap="lg">
+            <Card withBorder radius="md" padding="md">
+              <Group justify="space-between" align="start" wrap="nowrap">
+                <Stack gap={2}>
+                  <Text fw={700} size="lg">
+                    {selectedRow.guestName}
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    {selectedRow.guestPhone ?? "No phone"}
+                  </Text>
+                </Stack>
 
-            <Group gap="xl">
-              <Stack gap={0}>
-                <Text size="xs" c="dimmed">
-                  Rating
+                <Stack gap="xs" align="end">
+                  <Badge
+                    color={statusColorMap[selectedRow.feedbackStatus]}
+                    variant="light"
+                  >
+                    {statusLabel(selectedRow.feedbackStatus)}
+                  </Badge>
+                  {selectedRow.feedbackStatus === "completed" ? (
+                    <Badge
+                      leftSection={<IconGift size={12} />}
+                      color="teal"
+                      variant="light"
+                    >
+                      +{FEEDBACK_REWARD_POINTS} Points
+                    </Badge>
+                  ) : null}
+                </Stack>
+              </Group>
+            </Card>
+
+            <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+              <Paper withBorder radius="md" p="sm">
+                <Group gap="xs" mb={4}>
+                  <ThemeIcon variant="light" color="yellow" size="sm">
+                    <IconStar size={12} />
+                  </ThemeIcon>
+                  <Text size="xs" c="dimmed">
+                    Rating
+                  </Text>
+                </Group>
+                <Text fw={700} size="lg">
+                  {selectedRow.rating ?? "-"}
+                  {selectedRow.rating ? (
+                    <Text component="span" size="sm" c="dimmed" ml={4}>
+                      / 5
+                    </Text>
+                  ) : null}
                 </Text>
-                <Text fw={600}>{selectedRow.rating ?? "-"}</Text>
-              </Stack>
-              <Stack gap={0}>
-                <Text size="xs" c="dimmed">
+              </Paper>
+
+              <Paper withBorder radius="md" p="sm">
+                <Text size="xs" c="dimmed" mb={4}>
                   Check-out
                 </Text>
                 <Text fw={600}>{formatDate(selectedRow.checkOutDate)}</Text>
-              </Stack>
-            </Group>
+              </Paper>
 
-            <Stack gap={4}>
-              <Text size="xs" c="dimmed">
-                Full Comment
-              </Text>
-              <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                {selectedRow.comments ?? "-"}
-              </Text>
+              <Paper withBorder radius="md" p="sm">
+                <Text size="xs" c="dimmed" mb={4}>
+                  Last Update
+                </Text>
+                <Text fw={600}>{formatDateTime(selectedRow.updatedAt)}</Text>
+              </Paper>
+            </SimpleGrid>
+
+            <Divider />
+
+            <Stack gap="xs">
+              <Group gap="xs">
+                <ThemeIcon variant="light" color="blue" size="sm">
+                  <IconMessageCircle size={12} />
+                </ThemeIcon>
+                <Text size="sm" fw={600}>
+                  Full Comment
+                </Text>
+              </Group>
+
+              <Paper withBorder radius="md" p="sm" bg="gray.0">
+                <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                  {selectedRow.comments ?? "-"}
+                </Text>
+              </Paper>
             </Stack>
 
-            <Stack gap={4}>
-              <Text size="xs" c="dimmed">
+            <Stack gap="xs">
+              <Text size="sm" fw={600}>
                 Feedback Link
               </Text>
+
               {selectedRow.feedbackLink ? (
                 <>
-                  <Anchor href={selectedRow.feedbackLink} target="_blank">
-                    Open feedback link
-                  </Anchor>
+                  <Group gap="xs">
+                    <Button
+                      component="a"
+                      href={selectedRow.feedbackLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      variant="light"
+                      size="xs"
+                      leftSection={<IconExternalLink size={14} />}
+                    >
+                      Open Link
+                    </Button>
+
+                    <CopyButton value={selectedRow.feedbackLink} timeout={1500}>
+                      {({ copied, copy }) => (
+                        <Tooltip label={copied ? "Copied" : "Copy link"}>
+                          <ActionIcon
+                            variant="light"
+                            color={copied ? "teal" : "gray"}
+                            onClick={copy}
+                            aria-label="Copy feedback link"
+                          >
+                            {copied ? (
+                              <IconCheck size={14} />
+                            ) : (
+                              <IconCopy size={14} />
+                            )}
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                    </CopyButton>
+                  </Group>
+
                   <Text size="xs" c="dimmed" style={{ wordBreak: "break-all" }}>
                     {selectedRow.feedbackLink}
                   </Text>
