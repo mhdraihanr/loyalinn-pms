@@ -14,6 +14,7 @@ type DevelopmentPmsSyncSchedulerState = {
   intervalId: ReturnType<typeof setInterval>;
   intervalMs: number;
   isRunning: boolean;
+  overlapWarningLogged: boolean;
   stop: () => void;
 };
 
@@ -70,14 +71,18 @@ async function executeSync(options: {
   state: DevelopmentPmsSyncSchedulerState;
 }) {
   if (options.state.isRunning) {
-    options.logger.warn(
-      "Skipping development PMS sync tick because the previous run is still in progress.",
-    );
+    if (!options.state.overlapWarningLogged) {
+      options.logger.warn(
+        "Skipping development PMS sync tick because the previous run is still in progress.",
+      );
+      options.state.overlapWarningLogged = true;
+    }
 
     return;
   }
 
   options.state.isRunning = true;
+  options.state.overlapWarningLogged = false;
 
   try {
     await options.runSync();
@@ -127,6 +132,7 @@ export function startDevelopmentPmsSyncScheduler(
     }, intervalMs),
     intervalMs,
     isRunning: false,
+    overlapWarningLogged: false,
     stop: () => {
       clearInterval(state.intervalId);
       globalThis.__developmentPmsSyncScheduler = undefined;

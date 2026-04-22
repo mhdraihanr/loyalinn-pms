@@ -656,7 +656,9 @@ Current Status (2026-04-16):
 - ✅ WAHA post-stay handoff replies (`completed`, `ignored`) now use deterministic built-in bilingual templates in webhook logic (no env dependency).
 - ✅ QloApps guest phone resolution now prioritizes `customers` resource phone values and only falls back to the latest `addresses` record.
 - ✅ Task 4.4 is implemented end-to-end and currently verified by focused automated tests (see Verification Snapshot under Task 4.4).
-- 🚧 On-stay AI tooling and the Operations dashboard are not implemented yet.
+- ✅ Task 4.5 baseline is implemented: lifecycle routing now covers `pre-arrival`, `on-stay`, and `post-stay` in WAHA webhook flow with phase-specific agent entrypoints.
+- ✅ Lifecycle session persistence is implemented via `lifecycle_ai_sessions` (tracking stage, handoff state, and last action metadata).
+- 🚧 Operations dashboard for AI-generated requests is not implemented yet.
 
 Implemented files tracked for Phase 4 to date (Tasks 1-8):
 
@@ -666,6 +668,7 @@ Implemented files tracked for Phase 4 to date (Tasks 1-8):
   - `supabase/migrations/20260412001000_add_post_stay_ai_followup_template_trigger.sql`
   - `supabase/migrations/20260412002000_add_ai_settings_table.sql`
   - `supabase/migrations/20260412003000_add_inbound_message_dedupe_unique_index.sql`
+  - `supabase/migrations/20260419000100_add_lifecycle_ai_sessions.sql`
   - `supabase/schema.sql` (updated to match migration state)
 - Automation core:
   - `lib/automation/types.ts`
@@ -701,6 +704,14 @@ Implemented files tracked for Phase 4 to date (Tasks 1-8):
   - `components/settings/ai/ai-settings-form.tsx`
   - `lib/ai/settings.ts`
   - `lib/ai/agent.ts` (prompt builder now merges tenant AI settings)
+- Lifecycle AI orchestration:
+  - `lib/ai/lifecycle-agent.ts`
+  - `lib/ai/lifecycle-session.ts`
+  - `lib/ai/pre-arrival-agent.ts`
+  - `lib/ai/on-stay-agent.ts`
+  - `lib/ai/tools.ts`
+  - `app/api/webhooks/waha/route.ts` (lifecycle stage routing + per-stage logs)
+  - `lib/automation/status-trigger.ts` (lifecycle session touch on outbound automation sends)
 
 ### Task 4.1: PMS webhook endpoint ✅
 
@@ -805,10 +816,12 @@ Current implementation status:
 - ✅ Automatic scheduler escalation after 24 hours (`pending` -> `ai_followup`) is implemented in `lib/automation/feedback-escalation.ts`.
 - ✅ Follow-up kickoff message is now template-driven from Message Templates tab `post-stay-ai-followup` (not hardcoded).
 - ✅ Cron summary responses now expose `aiFollowupEscalated` and are validated at route level (`/api/cron/automation` and `/api/dev/scheduler`).
-- ✅ Tenant-specific AI prompt context is now configurable from dashboard `/settings/ai`, persisted in `ai_settings`, and consumed by `processGuestFeedback` to personalize AI replies.
+- ✅ Tenant-specific AI prompt context is now configurable from dashboard `/settings/ai`, persisted in `ai_settings`, and consumed by `processPostStayLifecycleConversation` to personalize AI replies.
 - ✅ Inbound WAHA dedupe is hardened with atomic DB-level unique index and webhook fallback payload hashing when provider message id is missing.
 - ✅ AI + automation language policy now consistently uses phone-based detection (`08` / `+62` / `62` => `id`, others => `en`) for status-trigger sends, escalation kickoff, and agentic follow-up chat.
-- ✅ Webhook now keeps completed/ignored closing replies from Agentic AI output (language follows detected guest language), while deterministic text fallback is reserved for retryable provider failures only.
+- ✅ Webhook `completed` flow now sends one AI-generated close-out reply, marks `lifecycle_ai_sessions` handoff (`completed_post_stay_handoff_notified`), and suppresses further auto AI replies on subsequent inbound messages.
+- ✅ Post-stay reservation matching now prioritizes `pending` / `ai_followup` before `completed` for the same guest phone, preventing old completed-handoff threads from blocking active reservations with different reservation IDs.
+- ✅ For same guest phone with multiple `completed` reservations, webhook now falls back to a different reservation ID when the first matched record is already `completed_post_stay_handoff_notified`, so the unnotified reservation can still send one close-out handoff message.
 - ✅ QloApps adapter phone mapping now prefers `customer.phone`/`customer.phone_mobile`; address phone is used only as fallback from the latest address row.
 
 Verification Snapshot (2026-04-16):
@@ -832,28 +845,61 @@ Use cases:
   5. The AI directly chats with the guest in a highly personalized manner: _"Halo [Nama], terima kasih sudah menginap di [Tipe Kamar] selama 3 malam kemarin. Bagaimana pengalaman Anda? Apakah ada masukan untuk kami?"_
   6. **Function Calling & Summarization:** AI parses the guest's unstructured chat reply, summarizes it, and calls `update_guest_feedback(rating, comments)` to save structured data back to the database, identical to the Web Form output.
 
-### Task 4.5: On-Stay Agentic AI (In-Stay Automation) 🚧
+### Task 4.5: Lifecycle Agentic AI Orchestration (Pre-arrival, On-stay, Post-stay) 🚧
 
 Files:
 
+- Create: a-proposal2/lib/ai/lifecycle-agent.ts
+- Create: a-proposal2/lib/ai/pre-arrival-agent.ts
 - Create: a-proposal2/lib/ai/on-stay-agent.ts
 - Create: a-proposal2/lib/ai/tools.ts
+- Create: a-proposal2/lib/ai/lifecycle-session.ts
+- Modify: a-proposal2/app/api/webhooks/waha/route.ts
+- Modify: a-proposal2/lib/automation/status-trigger.ts
+- Create: a-proposal2/supabase/migrations/20260419000100_add_lifecycle_ai_sessions.sql
 
-Use cases:
+Implementation snapshot (2026-04-19):
 
-- **AI Room Service / F&B Ordering:**
-  1. Guest sends a WhatsApp message ordering food to their room.
-  2. The WAHA Webhook triggers the AI Agent, providing the guest profile and active reservation in the context.
-  3. AI parses the request, asks for confirmation, and calls `order_in_room_dining(room_number, items)`.
-  4. System saves the structured order to `room_service_orders` (accessible in standard Next.js staff dashboards).
-- **AI Housekeeping & Request Management:**
-  1. Guest requests room cleaning or extra towels via WhatsApp.
-  2. AI calls `request_housekeeping(room_number, request_type, details)`.
-  3. System saves the request to `housekeeping_requests`.
-- **AI Concierge & FAQ:**
-  1. Guest asks hotel-related questions (e.g., "What time does the pool close?").
-  2. AI answers directly using RAG / predefined knowledge base.
-  3. Escalates to human staff explicitly using `escalate_to_human()` if necessary.
+- ✅ `processLifecycleGuestMessage` dispatcher is implemented and routes to pre-arrival, on-stay, or existing post-stay logic.
+- ✅ WAHA webhook now selects reservation lifecycle stage in priority order (`on-stay` -> `pre-arrival` -> eligible `checked-out`) and stores message history per stage trigger.
+- ✅ Pre-arrival tools (`capture_arrival_eta`, `request_early_checkin`, `escalate_to_human`) are implemented.
+- ✅ On-stay tools (`order_in_room_dining`, `request_housekeeping`, `escalate_to_human`) are implemented.
+- ✅ Session resumability metadata is persisted to `lifecycle_ai_sessions` for inbound/outbound events and handoff/fallback states.
+- ✅ Inbound dedupe has been expanded with unique key `(tenant_id, trigger_type, provider_message_id)` for lifecycle-safe processing.
+
+Goal:
+
+- Expand Agentic AI from post-stay-only flow into full reservation lifecycle orchestration.
+- Ensure AI can handle inbound guest conversations contextually for all active steps: pre-arrival, on-stay, and post-stay.
+
+Routing model:
+
+- **Pre-arrival**: reservation status `pre-arrival` routes to pre-arrival agent.
+- **On-stay**: reservation status `on-stay` routes to on-stay agent.
+- **Post-stay**: checked-out reservations with feedback follow-up status (`pending` / `ai_followup`) route to post-stay agent.
+
+Lifecycle use cases:
+
+- **Pre-arrival Agentic Assistant:**
+  1. Guest asks arrival preparation questions (early check-in, airport transfer, check-in requirements, add-ons).
+  2. WAHA webhook routes inbound chat to pre-arrival agent with reservation + guest context.
+  3. Agent answers directly and can call approved tools (e.g., `capture_arrival_eta`, `request_early_checkin`, `escalate_to_human`).
+  4. Actions are logged and stored for staff follow-up.
+- **On-stay Agentic Assistant:**
+  1. Guest requests room-service, housekeeping, or in-stay support via WhatsApp.
+  2. Agent calls operational tools (e.g., `order_in_room_dining`, `request_housekeeping`) and confirms outcomes.
+  3. Structured records are stored in `room_service_orders` / `housekeeping_requests`.
+- **Post-stay Agentic Assistant:**
+  1. Existing post-stay feedback flow remains active (web form + AI follow-up).
+  2. Agent captures rating/comments, applies reward logic, and closes with localized acknowledgement.
+  3. Retryable provider failures still use deterministic fallback and preserve webhook `200` behavior.
+
+Control & reliability requirements:
+
+- Use step-bounded multi-step tool-calling with explicit loop control and phase-specific tool access.
+- Keep deterministic safety boundaries for sensitive actions (tool approval/escalation policy).
+- Persist inbound/outbound conversation context per reservation for consistent agent routing and resumability.
+- Preserve existing idempotency, dedupe, and retry guarantees in webhook + automation worker flows.
 
 ### Task 4.6: Operations Dashboard (Housekeeping & Room Service) 🚧
 
@@ -866,7 +912,7 @@ Files:
 Features:
 
 - A dedicated UI page mapped under the "OPERATIONS" sidebar group.
-- Real-time or polled lists of `housekeeping_requests` and `room_service_orders` generated by the AI on-stay agent.
+- Real-time or polled lists of `housekeeping_requests` and `room_service_orders` generated by lifecycle Agentic AI (primarily on-stay).
 - Actions to mark requests as "In Progress" or "Completed".
 
 Acceptance Criteria (Phase 4):
@@ -875,7 +921,8 @@ Acceptance Criteria (Phase 4):
 - ✅ Failed sends are retried and visible in logs
 - ✅ Scheduled jobs execute in expected windows
 - ✅ Staff can monitor post-stay feedback from dashboard `/feedback`, including detail view for full comments and feedback link.
-- 🚧 Staff can view and update AI-generated requests in the Operations dashboard
+- ✅ Agentic AI routing is active across `pre-arrival`, `on-stay`, and `post-stay` lifecycle steps with phase-specific tools and guardrails.
+- 🚧 Staff can view and update AI-generated requests in the Operations dashboard.
 
 ---
 

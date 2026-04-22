@@ -198,4 +198,35 @@ describe("enqueueScheduledAutomationJobs", () => {
       aiFollowupEscalated: 0,
     });
   });
+
+  it("does not enqueue duplicate jobs when existing lookup returns multiple rows", async () => {
+    mocks.reservationSelectEqMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: "reservation-dup",
+          tenant_id: "tenant-dup",
+          pms_reservation_id: "BKG-DUP",
+          check_in_date: "2026-03-08",
+        },
+      ],
+      error: null,
+    });
+    mocks.reservationSelectEqMock.mockResolvedValueOnce({
+      data: [],
+      error: null,
+    });
+    mocks.automationJobMaybeSingleMock.mockResolvedValueOnce({
+      data: null,
+      error: {
+        message: "JSON object requested, multiple rows returned",
+      },
+    });
+
+    const result = await enqueueScheduledAutomationJobs(
+      new Date("2026-03-07T10:00:00.000Z"),
+    );
+
+    expect(mocks.automationJobInsertMock).not.toHaveBeenCalled();
+    expect(result.preArrivalEnqueued).toBe(0);
+  });
 });

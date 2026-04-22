@@ -11,6 +11,10 @@ import {
   completeAutomationJob,
   deadLetterAutomationJob,
 } from "@/lib/automation/queue";
+import {
+  upsertLifecycleAiSession,
+  type LifecycleStage,
+} from "@/lib/ai/lifecycle-session";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { wahaClient } from "@/lib/waha/client";
 
@@ -36,6 +40,20 @@ type ReservationGuest = {
 type ReservationTenant = {
   name: string | null;
 };
+
+function mapTriggerToLifecycleStage(
+  triggerType: string,
+): LifecycleStage | null {
+  if (
+    triggerType === "pre-arrival" ||
+    triggerType === "on-stay" ||
+    triggerType === "post-stay"
+  ) {
+    return triggerType;
+  }
+
+  return null;
+}
 
 function isOutOfOrderEvent(
   reservationUpdatedAt: string,
@@ -284,6 +302,19 @@ export async function processStatusTriggerJob(job: StatusTriggerJob) {
       );
       return;
     }
+  }
+
+  const lifecycleStage = mapTriggerToLifecycleStage(job.triggerType);
+  if (lifecycleStage) {
+    const guestId = guest?.id ?? null;
+    await upsertLifecycleAiSession(adminClient, {
+      tenantId: job.tenantId,
+      reservationId: reservation.id,
+      guestId,
+      stage: lifecycleStage,
+      sessionStatus: "active",
+      touchOutboundAt: true,
+    });
   }
 
   await completeAutomationJob(job.id, messageLog.id);

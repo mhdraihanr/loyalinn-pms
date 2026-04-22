@@ -7,7 +7,9 @@ import {
   FEEDBACK_REWARD_POINTS,
 } from "../automation/feedback-reward";
 
-const ENABLE_AI_FEEDBACK_DEBUG = process.env.AI_FEEDBACK_DEBUG === "true";
+const ENABLE_LIFECYCLE_AI_DEBUG =
+  process.env.LIFECYCLE_AI_DEBUG === "true" ||
+  process.env.AI_FEEDBACK_DEBUG === "true";
 
 type AiSettingsPromptContext = {
   hotel_name: string | null;
@@ -16,7 +18,16 @@ type AiSettingsPromptContext = {
   custom_instructions: string | null;
 };
 
-type FeedbackLanguage = "id" | "en";
+type PostStayLanguage = "id" | "en";
+
+type GeneratePostStayCompletionHandoffReplyParams = {
+  reservationId: string;
+  tenantId: string;
+  guestName: string;
+  hotelName: string;
+  messageHistory: ModelMessage[];
+  preferredLanguage?: PostStayLanguage;
+};
 
 function getLatestUserText(messageHistory: ModelMessage[]) {
   for (let i = messageHistory.length - 1; i >= 0; i -= 1) {
@@ -42,9 +53,9 @@ function normalizePromptText(value: string | null | undefined) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeFeedbackLanguage(
+function normalizePostStayLanguage(
   value: string | undefined,
-): FeedbackLanguage {
+): PostStayLanguage {
   return value === "en" ? "en" : "id";
 }
 
@@ -89,8 +100,8 @@ export function isRetryableProviderRateLimitError(error: unknown) {
   );
 }
 
-export function buildFeedbackSavedSystemInfo(params: {
-  language: FeedbackLanguage;
+export function buildPostStaySaveSystemInfo(params: {
+  language: PostStayLanguage;
   rating: number;
   comments: string;
   points: number;
@@ -130,7 +141,7 @@ async function getTenantAiSettingsPromptContext(
       return null;
     }
 
-    console.error("Error loading AI settings prompt context", {
+    console.error("Lifecycle AI: failed to load AI settings prompt context", {
       tenantId,
       error: message,
     });
@@ -140,7 +151,7 @@ async function getTenantAiSettingsPromptContext(
   return (data as AiSettingsPromptContext | null) ?? null;
 }
 
-export function buildGuestFeedbackSystemPrompt({
+export function buildPostStayLifecycleSystemPrompt({
   guestName,
   hotelName,
   aiSettings,
@@ -149,9 +160,9 @@ export function buildGuestFeedbackSystemPrompt({
   guestName: string;
   hotelName: string;
   aiSettings: AiSettingsPromptContext | null;
-  preferredLanguage?: FeedbackLanguage;
+  preferredLanguage?: PostStayLanguage;
 }) {
-  const resolvedLanguage = normalizeFeedbackLanguage(preferredLanguage);
+  const resolvedLanguage = normalizePostStayLanguage(preferredLanguage);
   const resolvedHotelName =
     normalizePromptText(aiSettings?.hotel_name) ??
     normalizePromptText(hotelName) ??
@@ -217,18 +228,139 @@ Aturan AI:
 - Jika tool sudah berhasil dipanggil (berhasil mencatat feedback), akhiri percakapan dengan mengucapkan terima kasih atas waktunya.${optionalBlock}`;
 }
 
-export async function processGuestFeedback(
+export function buildPostStayCompletionHandoffSystemPrompt({
+  guestName,
+  hotelName,
+  aiSettings,
+  preferredLanguage = "id",
+}: {
+  guestName: string;
+  hotelName: string;
+  aiSettings: AiSettingsPromptContext | null;
+  preferredLanguage?: PostStayLanguage;
+}) {
+  const resolvedLanguage = normalizePostStayLanguage(preferredLanguage);
+  const resolvedHotelName =
+    normalizePromptText(aiSettings?.hotel_name) ??
+    normalizePromptText(hotelName) ??
+    "Hotel";
+  const resolvedAiName =
+    normalizePromptText(aiSettings?.ai_name) ?? "Resepsionis AI";
+  const preferredTone = normalizePromptText(aiSettings?.tone_of_voice);
+  const customInstructions = normalizePromptText(
+    aiSettings?.custom_instructions,
+  );
+
+  const optionalContext: string[] = [];
+
+  if (preferredTone) {
+    optionalContext.push(
+      resolvedLanguage === "en"
+        ? `Preferred tone: ${preferredTone}.`
+        : `Preferensi tone: ${preferredTone}.`,
+    );
+  }
+
+  if (customInstructions) {
+    optionalContext.push(
+      resolvedLanguage === "en"
+        ? `Additional hotel instructions:\n${customInstructions}`
+        : `Instruksi tambahan dari hotel:\n${customInstructions}`,
+    );
+  }
+
+  const optionalBlock =
+    optionalContext.length > 0 ? `\n\n${optionalContext.join("\n")}` : "";
+
+  if (resolvedLanguage === "en") {
+    return `You are ${resolvedAiName}, the Front Desk AI for hotel "${resolvedHotelName}".
+The guest "${guestName}" has already completed their post-stay feedback.
+
+Write exactly one short closing message (1-2 sentences) that:
+- thanks the guest,
+- confirms the feedback flow is already completed,
+- hands over any further follow-up to the human hotel team.
+
+Hard constraints:
+- Do not ask any new questions.
+- Do not request additional rating/comments.
+- Do not mention internal systems or tools.
+- Keep it natural and professional in English only.${optionalBlock}`;
+  }
+
+  return `Anda adalah ${resolvedAiName}, resepsionis AI untuk hotel "${resolvedHotelName}".
+Tamu bernama "${guestName}" sudah menyelesaikan feedback post-stay.
+
+Tulis tepat satu pesan penutup singkat (1-2 kalimat) yang:
+- berterima kasih kepada tamu,
+- menegaskan bahwa alur feedback sudah selesai,
+- mengarahkan tindak lanjut berikutnya ke tim hotel manusia.
+
+Aturan wajib:
+- Jangan ajukan pertanyaan baru.
+- Jangan minta rating/komentar tambahan.
+- Jangan menyebut sistem atau tool internal.
+- Gunakan bahasa Indonesia yang natural dan profesional.${optionalBlock}`;
+}
+
+export async function generatePostStayCompletionHandoffReply(
+  params: GeneratePostStayCompletionHandoffReplyParams,
+) {
+  const supabase = await createAdminClient();
+  const resolvedLanguage = normalizePostStayLanguage(params.preferredLanguage);
+  const aiSettings = await getTenantAiSettingsPromptContext(
+    supabase,
+    params.tenantId,
+  );
+
+  const systemPrompt = buildPostStayCompletionHandoffSystemPrompt({
+    guestName: params.guestName,
+    hotelName: params.hotelName,
+    aiSettings,
+    preferredLanguage: resolvedLanguage,
+  });
+
+  const runGenerateText = async (modelId: string) => {
+    return generateText({
+      model: aiProvider(modelId),
+      system: systemPrompt,
+      messages: params.messageHistory,
+      stopWhen: stepCountIs(1),
+    });
+  };
+
+  let result;
+
+  try {
+    result = await runGenerateText(AI_MODEL);
+  } catch (error: unknown) {
+    const fallbackModel = AI_FALLBACK_MODEL.trim();
+    const canFallback = fallbackModel.length > 0 && fallbackModel !== AI_MODEL;
+
+    if (!canFallback || !isRetryableProviderRateLimitError(error)) {
+      throw error;
+    }
+
+    result = await runGenerateText(fallbackModel);
+  }
+
+  return {
+    response: result.text,
+  };
+}
+
+export async function processPostStayLifecycleConversation(
   reservationId: string,
   tenantId: string,
   guestName: string,
   hotelName: string,
   messageHistory: ModelMessage[],
-  preferredLanguage: FeedbackLanguage = "id",
+  preferredLanguage: PostStayLanguage = "id",
 ) {
   const supabase = await createAdminClient();
-  const resolvedLanguage = normalizeFeedbackLanguage(preferredLanguage);
+  const resolvedLanguage = normalizePostStayLanguage(preferredLanguage);
   const aiSettings = await getTenantAiSettingsPromptContext(supabase, tenantId);
-  const systemPrompt = buildGuestFeedbackSystemPrompt({
+  const systemPrompt = buildPostStayLifecycleSystemPrompt({
     guestName,
     hotelName,
     aiSettings,
@@ -245,7 +377,7 @@ export async function processGuestFeedback(
           commentsDescription:
             "Guest's free-text comments, explanation, or suggestions.",
           updateSuccess: (rating: number, comments: string, points: number) =>
-            buildFeedbackSavedSystemInfo({
+            buildPostStaySaveSystemInfo({
               language: "en",
               rating,
               comments,
@@ -271,7 +403,7 @@ export async function processGuestFeedback(
           commentsDescription:
             "Teks komentar, opini, atau saran bebas yang dituliskan oleh tamu.",
           updateSuccess: (rating: number, comments: string, points: number) =>
-            buildFeedbackSavedSystemInfo({
+            buildPostStaySaveSystemInfo({
               language: "id",
               rating,
               comments,
@@ -296,9 +428,9 @@ export async function processGuestFeedback(
       system: systemPrompt,
       messages: messageHistory,
       stopWhen: stepCountIs(3),
-      onStepFinish: ENABLE_AI_FEEDBACK_DEBUG
+      onStepFinish: ENABLE_LIFECYCLE_AI_DEBUG
         ? ({ stepNumber, finishReason, toolCalls, toolResults }) => {
-            console.info("[AI Feedback Step]", {
+            console.info("[Lifecycle AI][Post-stay] Step", {
               reservationId,
               model: modelId,
               stepNumber,
@@ -337,7 +469,10 @@ export async function processGuestFeedback(
                 rewardResult.pointsAwarded,
               );
             } catch (e: unknown) {
-              console.error("Error saving feedback via AI Tool:", e);
+              console.error(
+                "Lifecycle AI post-stay tool error while saving feedback:",
+                e,
+              );
               const reason = e instanceof Error ? e.message : "Unknown error";
               return copy.updateFailed(reason);
             }
@@ -363,7 +498,10 @@ export async function processGuestFeedback(
               if (error) throw error;
               return copy.ignoreSuccess;
             } catch (e: unknown) {
-              console.error("Error ignoring feedback via AI Tool:", e);
+              console.error(
+                "Lifecycle AI post-stay tool error while ignoring feedback:",
+                e,
+              );
               const reason = e instanceof Error ? e.message : "Unknown error";
               return copy.ignoreFailed(reason);
             }
@@ -387,7 +525,7 @@ export async function processGuestFeedback(
     }
 
     console.warn(
-      "AI provider rate-limit detected, retrying with fallback model",
+      "Lifecycle AI provider rate-limit detected, retrying with fallback model",
       {
         reservationId,
         primaryModel: AI_MODEL,
@@ -399,7 +537,7 @@ export async function processGuestFeedback(
     result = await runGenerateText(fallbackModel);
   }
 
-  if (ENABLE_AI_FEEDBACK_DEBUG) {
+  if (ENABLE_LIFECYCLE_AI_DEBUG) {
     const allToolCalls = (result.steps ?? []).flatMap(
       (step) => step.toolCalls ?? [],
     );
@@ -413,11 +551,11 @@ export async function processGuestFeedback(
     );
 
     const latestUserText = getLatestUserText(messageHistory);
-    const looksLikeDirectFeedback =
+    const looksLikeDirectPostStayFeedback =
       /(?:^|\D)([1-5])(?:\D|$)/.test(latestUserText) &&
       latestUserText.trim().length >= 8;
 
-    console.info("[AI Feedback Summary]", {
+    console.info("[Lifecycle AI][Post-stay] Summary", {
       reservationId,
       model: usedModel,
       steps: result.steps?.length ?? 0,
@@ -425,11 +563,11 @@ export async function processGuestFeedback(
       toolErrors,
     });
 
-    if (allToolCalls.length === 0 && looksLikeDirectFeedback) {
-      console.warn("[AI Feedback Warning]", {
+    if (allToolCalls.length === 0 && looksLikeDirectPostStayFeedback) {
+      console.warn("[Lifecycle AI][Post-stay] Warning", {
         reservationId,
         reason:
-          "No tool call despite user message looking like direct feedback",
+          "No tool call despite user message looking like direct post-stay feedback",
       });
     }
   }

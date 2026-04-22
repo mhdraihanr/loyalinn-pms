@@ -51,9 +51,9 @@ This matches existing helper functions:
 1. Owner updates settings on `/settings/ai`.
 2. Form submit calls server-side save action that delegates to `upsertCurrentTenantAiSettings` in `lib/ai/settings.ts`.
 3. WAHA inbound follow-up webhook resolves reservation tenant and calls:
-   - `processGuestFeedback(reservationId, tenantId, guestName, hotelName, messageHistory)`
+   - `processPostStayLifecycleConversation(reservationId, tenantId, guestName, hotelName, messageHistory)`
 4. AI layer loads tenant context from `ai_settings` using admin client.
-5. `buildGuestFeedbackSystemPrompt` merges:
+5. `buildPostStayLifecycleSystemPrompt` merges:
    - tenant overrides (`hotel_name`, `ai_name`, `tone_of_voice`, `custom_instructions`)
    - reservation fallback (`hotelName`)
    - safe defaults when values are empty.

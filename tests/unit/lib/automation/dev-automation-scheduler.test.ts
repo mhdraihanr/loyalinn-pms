@@ -125,6 +125,41 @@ describe("startDevelopmentAutomationScheduler", () => {
     expect(runWorker).toHaveBeenCalledTimes(2);
   });
 
+  it("emits overlap warning only once while waiting for long-running worker", async () => {
+    let releaseRun: (() => void) | undefined;
+    const runWorker = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseRun = resolve;
+        }),
+    );
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    startDevelopmentAutomationScheduler({
+      runWorker,
+      logger,
+      environment: {
+        nodeEnv: "development",
+        nextRuntime: "nodejs",
+      },
+    });
+    await vi.runAllTicks();
+
+    await vi.advanceTimersByTimeAsync(defaultIntervalMs * 3);
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+
+    releaseRun?.();
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(defaultIntervalMs);
+
+    expect(runWorker).toHaveBeenCalledTimes(2);
+  });
+
   it("uses DEV_AUTOMATION_SYNC_INTERVAL_MS when provided", async () => {
     process.env.DEV_AUTOMATION_SYNC_INTERVAL_MS = "5000";
     const runWorker = vi.fn().mockResolvedValue(undefined);

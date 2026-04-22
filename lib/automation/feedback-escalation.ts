@@ -184,7 +184,10 @@ export async function escalatePendingFeedbackToAiFollowup(
         });
 
       if (logError) {
-        console.error("Failed to log AI follow-up kickoff message:", logError);
+        console.error(
+          "Failed to log lifecycle post-stay kickoff message:",
+          logError,
+        );
       }
 
       escalated += 1;
@@ -200,7 +203,10 @@ export async function escalatePendingFeedbackToAiFollowup(
         .eq("post_stay_feedback_status", "ai_followup");
 
       if (rollbackError) {
-        console.error("Failed to rollback AI follow-up status:", rollbackError);
+        console.error(
+          "Failed to rollback lifecycle post-stay follow-up status:",
+          rollbackError,
+        );
       }
 
       await adminClient.from("message_logs").insert({
@@ -213,7 +219,7 @@ export async function escalatePendingFeedbackToAiFollowup(
         content: kickoffMessage,
         direction: "outbound",
         status: "failed",
-        error_message: `AI follow-up kickoff failed: ${reason}`,
+        error_message: `Lifecycle post-stay kickoff failed: ${reason}`,
         trigger_type: "post-stay",
         sent_at: sendAt,
       });

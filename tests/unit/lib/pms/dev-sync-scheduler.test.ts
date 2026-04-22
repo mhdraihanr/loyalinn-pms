@@ -84,4 +84,39 @@ describe("startDevelopmentPmsSyncScheduler", () => {
     expect(result.started).toBe(false);
     expect(runSync).not.toHaveBeenCalled();
   });
+
+  it("emits overlap warning only once while waiting for long-running sync", async () => {
+    let releaseRun: (() => void) | undefined;
+    const runSync = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseRun = resolve;
+        }),
+    );
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    startDevelopmentPmsSyncScheduler({
+      runSync,
+      logger,
+      environment: {
+        nodeEnv: "development",
+        nextRuntime: "nodejs",
+      },
+    });
+    await vi.runAllTicks();
+
+    await vi.advanceTimersByTimeAsync(defaultIntervalMs * 3);
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+
+    releaseRun?.();
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(defaultIntervalMs);
+
+    expect(runSync).toHaveBeenCalledTimes(2);
+  });
 });

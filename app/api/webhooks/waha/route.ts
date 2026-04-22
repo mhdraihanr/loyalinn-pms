@@ -3,7 +3,13 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import type { ModelMessage } from "ai";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { processGuestFeedback } from "@/lib/ai/agent";
+import { generatePostStayCompletionHandoffReply } from "@/lib/ai/agent";
+import { processLifecycleGuestMessage } from "@/lib/ai/lifecycle-agent";
+import {
+  type LifecycleLanguage,
+  type LifecycleStage,
+  upsertLifecycleAiSession,
+} from "@/lib/ai/lifecycle-session";
 import { wahaClient } from "@/lib/waha/client";
 
 const RESERVATION_LOOKUP_SELECT = `
@@ -11,18 +17,40 @@ const RESERVATION_LOOKUP_SELECT = `
   tenant_id,
   pms_reservation_id,
   guest_id,
+  status,
+  room_number,
+  post_stay_feedback_status,
   guests!inner(name, phone),
   tenants!inner(name)
 `;
 
 const SUPPORTED_HMAC_ALGORITHMS = new Set(["sha256", "sha512"]);
 
-type FeedbackLanguage = "id" | "en";
-
-const AI_PROVIDER_FAILURE_REPLY_TEMPLATES: Record<FeedbackLanguage, string> = {
+const AI_PROVIDER_FAILURE_REPLY_TEMPLATES: Record<LifecycleLanguage, string> = {
   id: "Terima kasih {{guestName}}, pesan Anda sudah kami terima. Saat ini asisten otomatis kami sedang sangat sibuk. Tim {{hotelName}} akan menindaklanjuti Anda secara manual sesegera mungkin.",
   en: "Thank you {{guestName}}, we received your message. Our automated assistant is currently overloaded. The {{hotelName}} team will follow up with you manually as soon as possible.",
 };
+
+const POST_STAY_ELIGIBLE_FEEDBACK_STATUSES = new Set([
+  "pending",
+  "ai_followup",
+  "completed",
+]);
+
+const COMPLETED_POST_STAY_HANDOFF_ACTION =
+  "completed_post_stay_handoff_notified";
+
+const RESERVATION_STATUS_LOOKUP_ORDER = [
+  "on-stay",
+  "pre-arrival",
+  "checked-out",
+] as const;
+
+const CHECKED_OUT_FEEDBACK_STATUS_LOOKUP_ORDER = [
+  "pending",
+  "ai_followup",
+  "completed",
+] as const;
 
 function parseBooleanLike(value: unknown) {
   if (typeof value === "boolean") {
@@ -457,9 +485,9 @@ function isIndonesianPhoneNumber(phone: string | null | undefined) {
   );
 }
 
-function detectFeedbackLanguageByPhone(
+function detectLifecycleLanguageByPhone(
   phone: string | null | undefined,
-): FeedbackLanguage {
+): LifecycleLanguage {
   return isIndonesianPhoneNumber(phone) ? "id" : "en";
 }
 
@@ -475,27 +503,223 @@ function isNotFoundError(error: { code?: string; message?: string } | null) {
   return /not found|no rows/i.test(error.message ?? "");
 }
 
-async function findAiFollowupReservationByPhone(
+function isMissingLifecycleSessionTableError(
+  error: {
+    message?: string;
+  } | null,
+) {
+  if (!error?.message) {
+    return false;
+  }
+
+  return /relation\s+"?lifecycle_ai_sessions"?\s+does not exist/i.test(
+    error.message,
+  );
+}
+
+function isMultipleRowsError(error: { message?: string } | null) {
+  const message = error?.message ?? "";
+  return /multiple rows|more than one row|result contains \d+ rows/i.test(
+    message,
+  );
+}
+
+function isCompletedPostStayHandoffRecord(record: unknown) {
+  const parsed = toRecord(record);
+  return (
+    parsed?.session_status === "handoff" &&
+    parsed?.last_action_type === COMPLETED_POST_STAY_HANDOFF_ACTION
+  );
+}
+
+async function hasCompletedPostStayHandoffBeenNotified(
+  supabase: Awaited<ReturnType<typeof createAdminClient>>,
+  tenantId: string,
+  reservationId: string,
+) {
+  const { data, error } = await supabase
+    .from("lifecycle_ai_sessions")
+    .select("session_status, last_action_type")
+    .eq("tenant_id", tenantId)
+    .eq("reservation_id", reservationId)
+    .eq("lifecycle_stage", "post-stay")
+    .maybeSingle();
+
+  if (error) {
+    if (isMultipleRowsError(error)) {
+      const { data: rows, error: rowsError } = await supabase
+        .from("lifecycle_ai_sessions")
+        .select("session_status, last_action_type")
+        .eq("tenant_id", tenantId)
+        .eq("reservation_id", reservationId)
+        .eq("lifecycle_stage", "post-stay")
+        .order("updated_at", { ascending: false })
+        .limit(25);
+
+      if (rowsError) {
+        if (
+          isNotFoundError(rowsError) ||
+          isMissingLifecycleSessionTableError(rowsError)
+        ) {
+          return false;
+        }
+
+        throw new Error(
+          rowsError.message ||
+            "Failed to read lifecycle_ai_sessions handoff state",
+        );
+      }
+
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return false;
+      }
+
+      return rows.some((row) => isCompletedPostStayHandoffRecord(row));
+    }
+
+    if (isNotFoundError(error) || isMissingLifecycleSessionTableError(error)) {
+      return false;
+    }
+
+    throw new Error(
+      error.message || "Failed to read lifecycle_ai_sessions handoff state",
+    );
+  }
+
+  return isCompletedPostStayHandoffRecord(data);
+}
+
+async function findActiveLifecycleReservationByPhone(
   supabase: Awaited<ReturnType<typeof createAdminClient>>,
   phoneCandidates: string[],
 ) {
-  for (const candidate of phoneCandidates) {
-    const { data: reservation, error } = await supabase
-      .from("reservations")
-      .select(RESERVATION_LOOKUP_SELECT)
-      .eq("post_stay_feedback_status", "ai_followup")
-      .ilike("guests.phone", `%${candidate}%`)
-      .order("check_out_date", { ascending: false })
-      .limit(1)
-      .single();
+  for (const status of RESERVATION_STATUS_LOOKUP_ORDER) {
+    for (const candidate of phoneCandidates) {
+      const orderColumn =
+        status === "checked-out" ? "check_out_date" : "check_in_date";
+      const orderAscending = status !== "checked-out";
 
-    if (reservation) {
-      return reservation;
-    }
+      const checkedOutStatusesToProbe =
+        status === "checked-out"
+          ? CHECKED_OUT_FEEDBACK_STATUS_LOOKUP_ORDER
+          : [null];
 
-    if (error && !isNotFoundError(error)) {
-      throw new Error(error.message || "Failed to lookup reservation");
+      for (const checkedOutFeedbackStatus of checkedOutStatusesToProbe) {
+        let reservationQuery = supabase
+          .from("reservations")
+          .select(RESERVATION_LOOKUP_SELECT)
+          .eq("status", status)
+          .ilike("guests.phone", `%${candidate}%`);
+
+        if (status === "checked-out" && checkedOutFeedbackStatus) {
+          reservationQuery = reservationQuery.eq(
+            "post_stay_feedback_status",
+            checkedOutFeedbackStatus,
+          );
+        }
+
+        const { data: reservation, error } = await reservationQuery
+          .order(orderColumn, { ascending: orderAscending })
+          .limit(1)
+          .single();
+
+        if (reservation) {
+          if (
+            status === "checked-out" &&
+            checkedOutFeedbackStatus === "completed"
+          ) {
+            const completedHandoffAlreadyNotified =
+              await hasCompletedPostStayHandoffBeenNotified(
+                supabase,
+                reservation.tenant_id,
+                reservation.id,
+              );
+
+            if (completedHandoffAlreadyNotified) {
+              const {
+                data: alternativeCompletedReservation,
+                error: alternativeError,
+              } = await supabase
+                .from("reservations")
+                .select(RESERVATION_LOOKUP_SELECT)
+                .eq("status", "checked-out")
+                .eq("post_stay_feedback_status", "completed")
+                .neq("id", reservation.id)
+                .ilike("guests.phone", `%${candidate}%`)
+                .order("check_out_date", { ascending: false })
+                .limit(1)
+                .single();
+
+              if (alternativeError && !isNotFoundError(alternativeError)) {
+                throw new Error(
+                  alternativeError.message ||
+                    "Failed to lookup alternative completed reservation",
+                );
+              }
+
+              if (alternativeCompletedReservation) {
+                const alternativeAlreadyNotified =
+                  await hasCompletedPostStayHandoffBeenNotified(
+                    supabase,
+                    alternativeCompletedReservation.tenant_id,
+                    alternativeCompletedReservation.id,
+                  );
+
+                if (!alternativeAlreadyNotified) {
+                  const lifecycleStage = deriveLifecycleStage(
+                    alternativeCompletedReservation,
+                  );
+
+                  if (lifecycleStage) {
+                    return {
+                      reservation: alternativeCompletedReservation,
+                      lifecycleStage,
+                    };
+                  }
+                }
+              }
+            }
+          }
+
+          const lifecycleStage = deriveLifecycleStage(reservation);
+
+          if (lifecycleStage) {
+            return {
+              reservation,
+              lifecycleStage,
+            };
+          }
+        }
+
+        if (error && !isNotFoundError(error)) {
+          throw new Error(error.message || "Failed to lookup reservation");
+        }
+      }
     }
+  }
+
+  return null;
+}
+
+function deriveLifecycleStage(reservation: {
+  status?: string | null;
+  post_stay_feedback_status?: string | null;
+}): LifecycleStage | null {
+  if (reservation.status === "on-stay") {
+    return "on-stay";
+  }
+
+  if (reservation.status === "pre-arrival") {
+    return "pre-arrival";
+  }
+
+  if (
+    reservation.status === "checked-out" &&
+    POST_STAY_ELIGIBLE_FEEDBACK_STATUSES.has(
+      reservation.post_stay_feedback_status ?? "",
+    )
+  ) {
+    return "post-stay";
   }
 
   return null;
@@ -564,12 +788,19 @@ function renderHandoffTemplate(
 function resolveAiProviderFailureReply(params: {
   guestName: string;
   hotelName: string;
-  preferredLanguage: FeedbackLanguage;
+  preferredLanguage: LifecycleLanguage;
 }) {
   const { guestName, hotelName, preferredLanguage } = params;
   const template = AI_PROVIDER_FAILURE_REPLY_TEMPLATES[preferredLanguage];
 
   return renderHandoffTemplate(template, { guestName, hotelName });
+}
+
+function isLifecycleAiDebugEnabled() {
+  return (
+    process.env.LIFECYCLE_AI_DEBUG === "true" ||
+    process.env.AI_FEEDBACK_DEBUG === "true"
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -648,21 +879,25 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = await createAdminClient();
+    const lifecycleDebugEnabled = isLifecycleAiDebugEnabled();
     const providerMessageId =
       getProviderMessageId(message) ?? buildFallbackInboundMessageId(rawBody);
 
-    const reservation = await findAiFollowupReservationByPhone(
+    const reservationMatch = await findActiveLifecycleReservationByPhone(
       supabase,
       phoneCandidates,
     );
 
-    if (!reservation) {
-      // Tidak ada reservasi yang sedang di-follow up oleh AI untuk nomor ini
+    if (!reservationMatch) {
+      // Tidak ada reservasi lifecycle aktif untuk nomor ini
       return NextResponse.json(
-        { status: "ignored: no active ai_followup reservation found" },
+        { status: "ignored: no active lifecycle reservation found" },
         { status: 200 },
       );
     }
+
+    const { reservation, lifecycleStage } = reservationMatch;
+    const triggerType = lifecycleStage;
 
     // 3. Simpan pesan masuk (inbound) dari tamu ke tabel message_logs
     const { error: inboundInsertError } = await supabase
@@ -675,7 +910,7 @@ export async function POST(req: NextRequest) {
         content: body,
         direction: "inbound",
         status: "received",
-        trigger_type: "post-stay", // Mengambil logic AI Chat
+        trigger_type: triggerType,
         provider_message_id: providerMessageId,
         sent_at: new Date(
           Number(message.timestamp ?? Date.now() / 1000) * 1000,
@@ -683,6 +918,15 @@ export async function POST(req: NextRequest) {
       });
 
     if (isUniqueViolationError(inboundInsertError)) {
+      if (lifecycleDebugEnabled) {
+        console.info("[WAHA][Lifecycle AI] Duplicate inbound ignored", {
+          tenantId: reservation.tenant_id,
+          reservationId: reservation.id,
+          lifecycleStage,
+          providerMessageId,
+        });
+      }
+
       return NextResponse.json(
         { status: "ignored: duplicate message" },
         { status: 200 },
@@ -695,17 +939,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (lifecycleDebugEnabled) {
+      console.info("[WAHA][Lifecycle AI] Route selected", {
+        tenantId: reservation.tenant_id,
+        reservationId: reservation.id,
+        lifecycleStage,
+        reservationStatus: reservation.status,
+        postStayFeedbackStatus: reservation.post_stay_feedback_status,
+        providerMessageId,
+      });
+    }
+
     // 4. Tarik riwayat pesan dari tamu ini terkait reservasi (inbound & outbound)
     const { data: rawLogs } = await supabase
       .from("message_logs")
       .select("direction, content")
       .eq("reservation_id", reservation.id)
-      .eq("trigger_type", "post-stay")
+      .eq("trigger_type", triggerType)
       .order("created_at", { ascending: true });
 
     const guestName = reservation.guests?.[0]?.name ?? "Guest";
     const hotelName = reservation.tenants?.[0]?.name ?? "Hotel";
-    const preferredLanguage = detectFeedbackLanguageByPhone(
+    const preferredLanguage = detectLifecycleLanguageByPhone(
       reservation.guests?.[0]?.phone ?? phone,
     );
 
@@ -715,18 +970,170 @@ export async function POST(req: NextRequest) {
       content: String(log.content ?? ""),
     }));
 
+    const isCompletedPostStayConversation =
+      lifecycleStage === "post-stay" &&
+      reservation.post_stay_feedback_status === "completed";
+
+    if (isCompletedPostStayConversation) {
+      const alreadyNotified = await hasCompletedPostStayHandoffBeenNotified(
+        supabase,
+        reservation.tenant_id,
+        reservation.id,
+      );
+
+      if (lifecycleDebugEnabled) {
+        console.info("[WAHA][Lifecycle AI] Completed handoff gate", {
+          tenantId: reservation.tenant_id,
+          reservationId: reservation.id,
+          alreadyNotified,
+        });
+      }
+
+      if (alreadyNotified) {
+        if (lifecycleDebugEnabled) {
+          console.info("[WAHA][Lifecycle AI] Completed handoff unchanged", {
+            tenantId: reservation.tenant_id,
+            reservationId: reservation.id,
+          });
+        }
+
+        await upsertLifecycleAiSession(supabase, {
+          tenantId: reservation.tenant_id,
+          reservationId: reservation.id,
+          guestId: reservation.guest_id,
+          stage: lifecycleStage,
+          sessionStatus: "handoff",
+          needsHumanFollowUp: true,
+          lastActionType: COMPLETED_POST_STAY_HANDOFF_ACTION,
+          touchInboundAt: true,
+        });
+
+        return NextResponse.json(
+          { status: "ignored: post-stay completed handoff already active" },
+          { status: 200 },
+        );
+      }
+
+      let handoffReply = "";
+      let fallbackUsed = false;
+
+      try {
+        const aiResponse = await generatePostStayCompletionHandoffReply({
+          reservationId: reservation.id,
+          tenantId: reservation.tenant_id,
+          guestName,
+          hotelName,
+          messageHistory,
+          preferredLanguage,
+        });
+
+        handoffReply = aiResponse.response.trim();
+      } catch (error: unknown) {
+        if (!isRetryableAiProviderError(error)) {
+          throw error;
+        }
+
+        fallbackUsed = true;
+        handoffReply = resolveAiProviderFailureReply({
+          guestName,
+          hotelName,
+          preferredLanguage,
+        });
+
+        const detail = error instanceof Error ? error.message : String(error);
+        console.warn(
+          "WAHA completed post-stay handoff AI retryable provider error, sending fallback reply",
+          {
+            reservationId: reservation.id,
+            tenantId: reservation.tenant_id,
+            detail,
+          },
+        );
+      }
+
+      const replyText = handoffReply.trim();
+
+      if (!replyText) {
+        throw new Error(
+          "Completed post-stay handoff reply is empty and cannot be sent",
+        );
+      }
+
+      await wahaClient.sendMessage(session, chatId, replyText);
+      await supabase.from("message_logs").insert({
+        tenant_id: reservation.tenant_id,
+        reservation_id: reservation.id,
+        guest_id: reservation.guest_id,
+        phone,
+        content: replyText,
+        direction: "outbound",
+        status: "sent",
+        trigger_type: triggerType,
+      });
+
+      await upsertLifecycleAiSession(supabase, {
+        tenantId: reservation.tenant_id,
+        reservationId: reservation.id,
+        guestId: reservation.guest_id,
+        stage: lifecycleStage,
+        sessionStatus: "handoff",
+        needsHumanFollowUp: true,
+        lastActionType: COMPLETED_POST_STAY_HANDOFF_ACTION,
+        touchInboundAt: true,
+        touchOutboundAt: true,
+      });
+
+      if (lifecycleDebugEnabled) {
+        console.info("[WAHA][Lifecycle AI] Completed handoff sent", {
+          tenantId: reservation.tenant_id,
+          reservationId: reservation.id,
+          fallbackUsed,
+          replyLength: replyText.length,
+        });
+      }
+
+      return NextResponse.json({
+        status: fallbackUsed
+          ? "success:completed-handoff:fallback"
+          : "success:completed-handoff",
+        ai_reply: replyText,
+        handoff: true,
+        fallback: fallbackUsed,
+      });
+    }
+
+    await upsertLifecycleAiSession(supabase, {
+      tenantId: reservation.tenant_id,
+      reservationId: reservation.id,
+      guestId: reservation.guest_id,
+      stage: lifecycleStage,
+      sessionStatus: "active",
+      touchInboundAt: true,
+    });
+
     // 5. Panggil AI Agent (Vercel AI SDK)
     let aiResponse: { response: string };
 
     try {
-      aiResponse = await processGuestFeedback(
-        reservation.id,
-        reservation.tenant_id,
+      if (lifecycleDebugEnabled) {
+        console.info("[WAHA][Lifecycle AI] Dispatching stage agent", {
+          tenantId: reservation.tenant_id,
+          reservationId: reservation.id,
+          lifecycleStage,
+        });
+      }
+
+      aiResponse = await processLifecycleGuestMessage({
+        stage: lifecycleStage,
+        reservationId: reservation.id,
+        tenantId: reservation.tenant_id,
+        guestId: reservation.guest_id,
         guestName,
         hotelName,
+        roomNumber: reservation.room_number ?? "-",
         messageHistory,
         preferredLanguage,
-      );
+      });
     } catch (error: unknown) {
       if (!isRetryableAiProviderError(error)) {
         throw error;
@@ -739,11 +1146,14 @@ export async function POST(req: NextRequest) {
       });
 
       const detail = error instanceof Error ? error.message : String(error);
-      console.warn("WAHA AI retryable provider error, sending fallback reply", {
-        reservationId: reservation.id,
-        tenantId: reservation.tenant_id,
-        detail,
-      });
+      console.warn(
+        "WAHA lifecycle AI retryable provider error, sending fallback reply",
+        {
+          reservationId: reservation.id,
+          tenantId: reservation.tenant_id,
+          detail,
+        },
+      );
 
       await wahaClient.sendMessage(session, chatId, fallbackReply);
       await supabase.from("message_logs").insert({
@@ -754,7 +1164,21 @@ export async function POST(req: NextRequest) {
         content: fallbackReply,
         direction: "outbound",
         status: "sent",
-        trigger_type: "post-stay",
+        trigger_type: triggerType,
+      });
+
+      await upsertLifecycleAiSession(supabase, {
+        tenantId: reservation.tenant_id,
+        reservationId: reservation.id,
+        guestId: reservation.guest_id,
+        stage: lifecycleStage,
+        sessionStatus: "handoff",
+        needsHumanFollowUp: true,
+        lastActionType: "provider_fallback_handoff",
+        lastActionPayload: {
+          detail,
+        },
+        touchOutboundAt: true,
       });
 
       return NextResponse.json({
@@ -765,6 +1189,15 @@ export async function POST(req: NextRequest) {
     }
 
     const replyText = aiResponse.response;
+
+    if (lifecycleDebugEnabled) {
+      console.info("[WAHA][Lifecycle AI] Stage agent responded", {
+        tenantId: reservation.tenant_id,
+        reservationId: reservation.id,
+        lifecycleStage,
+        replyLength: replyText.length,
+      });
+    }
 
     if (replyText) {
       // 6. Tanggapi via WhatsApp (Kirim Pesan Keluar)
@@ -781,13 +1214,22 @@ export async function POST(req: NextRequest) {
         content: replyText,
         direction: "outbound",
         status: "sent",
-        trigger_type: "post-stay",
+        trigger_type: triggerType,
+      });
+
+      await upsertLifecycleAiSession(supabase, {
+        tenantId: reservation.tenant_id,
+        reservationId: reservation.id,
+        guestId: reservation.guest_id,
+        stage: lifecycleStage,
+        sessionStatus: "active",
+        touchOutboundAt: true,
       });
     }
 
     return NextResponse.json({ status: "success", ai_reply: replyText });
   } catch (error: unknown) {
-    console.error("WAHA Webhook AI Error:", error);
+    console.error("WAHA webhook lifecycle AI error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

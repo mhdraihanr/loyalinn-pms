@@ -4,6 +4,23 @@ import { getCurrentUserTenant } from "@/lib/auth/tenant";
 
 const DEFAULT_WEBHOOK_EVENTS = ["message.any"];
 
+type WebhookTarget = {
+  url: string;
+  events: string[];
+};
+
+function normalizeWebhookEvents(events: string[]) {
+  const uniqueEvents = Array.from(
+    new Set(events.map((eventName) => eventName.trim()).filter(Boolean)),
+  );
+
+  if (uniqueEvents.includes("message.any")) {
+    return uniqueEvents.filter((eventName) => eventName !== "message");
+  }
+
+  return uniqueEvents;
+}
+
 function resolveWebhookUrl() {
   const explicitUrl =
     process.env.WAHA_WEBHOOK_URL?.trim() ||
@@ -40,16 +57,48 @@ function resolveWebhookEvents() {
     process.env.WHATSAPP_HOOK_EVENTS ||
     DEFAULT_WEBHOOK_EVENTS.join(",");
 
-  const parsedEvents = rawEvents
-    .split(",")
-    .map((eventName) => eventName.trim())
-    .filter((eventName) => eventName.length > 0);
+  const parsedEvents = normalizeWebhookEvents(rawEvents.split(","));
 
   if (parsedEvents.length === 0) {
     return DEFAULT_WEBHOOK_EVENTS;
   }
 
-  return Array.from(new Set(parsedEvents));
+  return parsedEvents;
+}
+
+function isEventCoveredBy(globalEventSet: Set<string>, eventName: string) {
+  if (globalEventSet.has(eventName)) {
+    return true;
+  }
+
+  if (eventName === "message" && globalEventSet.has("message.any")) {
+    return true;
+  }
+
+  return false;
+}
+
+function hasEquivalentGlobalWebhook(target: WebhookTarget) {
+  const globalWebhookUrl = process.env.WHATSAPP_HOOK_URL?.trim();
+  const rawGlobalEvents = process.env.WHATSAPP_HOOK_EVENTS;
+
+  if (!globalWebhookUrl || !rawGlobalEvents) {
+    return false;
+  }
+
+  if (globalWebhookUrl !== target.url) {
+    return false;
+  }
+
+  const globalEvents = normalizeWebhookEvents(rawGlobalEvents.split(","));
+  if (globalEvents.length === 0) {
+    return false;
+  }
+
+  const globalEventSet = new Set(globalEvents);
+  return target.events.every((eventName) =>
+    isEventCoveredBy(globalEventSet, eventName),
+  );
 }
 
 function buildWebhookConfig() {
@@ -88,15 +137,31 @@ export async function POST() {
 
     const shouldAutoConfigureWebhooks =
       process.env.WAHA_AUTO_CONFIGURE_WEBHOOKS !== "false";
+    let webhooksConfigured = false;
+    let webhooksSkipReason:
+      | "auto-config-disabled"
+      | "global-webhook-configured"
+      | null = null;
 
     if (shouldAutoConfigureWebhooks) {
-      await wahaClient.updateSessionConfig(sessionName, buildWebhookConfig());
+      const webhookConfig = buildWebhookConfig();
+      const [primaryWebhook] = webhookConfig.webhooks;
+
+      if (primaryWebhook && hasEquivalentGlobalWebhook(primaryWebhook)) {
+        webhooksSkipReason = "global-webhook-configured";
+      } else {
+        await wahaClient.updateSessionConfig(sessionName, webhookConfig);
+        webhooksConfigured = true;
+      }
+    } else {
+      webhooksSkipReason = "auto-config-disabled";
     }
 
     return NextResponse.json({
       ...result,
       session: sessionName,
-      webhooksConfigured: shouldAutoConfigureWebhooks,
+      webhooksConfigured,
+      ...(webhooksSkipReason ? { webhooksSkipReason } : {}),
     });
   } catch (error: unknown) {
     const message =

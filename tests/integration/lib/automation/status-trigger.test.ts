@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   existingLogMaybeSingleMock: vi.fn(),
   messageLogSingleMock: vi.fn(),
   messageLogUpdateEqMock: vi.fn(),
+  lifecycleSessionUpsertMock: vi.fn(),
   sendMessageMock: vi.fn(),
   completeAutomationJobMock: vi.fn(),
   deadLetterAutomationJobMock: vi.fn(),
@@ -73,6 +74,12 @@ vi.mock("@/lib/supabase/admin", () => ({
         };
       }
 
+      if (table === "lifecycle_ai_sessions") {
+        return {
+          upsert: mocks.lifecycleSessionUpsertMock,
+        };
+      }
+
       throw new Error(`Unexpected table ${table}`);
     },
   }),
@@ -113,6 +120,7 @@ describe("processStatusTriggerJob", () => {
     mocks.existingLogMaybeSingleMock.mockReset();
     mocks.messageLogSingleMock.mockReset();
     mocks.messageLogUpdateEqMock.mockReset();
+    mocks.lifecycleSessionUpsertMock.mockReset();
     mocks.sendMessageMock.mockReset();
     mocks.completeAutomationJobMock.mockReset();
     mocks.deadLetterAutomationJobMock.mockReset();
@@ -134,6 +142,7 @@ describe("processStatusTriggerJob", () => {
       error: null,
     });
     mocks.messageLogUpdateEqMock.mockResolvedValue({ error: null });
+    mocks.lifecycleSessionUpsertMock.mockResolvedValue({ error: null });
     mocks.sendMessageMock.mockResolvedValue({ id: "provider-1" });
   });
 

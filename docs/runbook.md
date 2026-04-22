@@ -89,6 +89,36 @@ requestId:"abc-123" AND level:"error"
 - Reconnect WhatsApp session via QR
 - Check dead-letter queue for unrecoverable failures
 
+### WAHA Webhook Delivered 4x / Repeated Inbound Calls
+
+**Symptoms:**
+
+- One guest inbound message appears as 3-4 webhook requests to `POST /api/webhooks/waha`.
+- Logs show repeated provider message IDs with duplicate handling.
+- Operators suspect route loop, but message dedupe remains active.
+
+**Actions:**
+
+1. Check global WAHA webhook config in container:
+   - `docker exec waha_server printenv | grep -E 'WHATSAPP_HOOK_URL|WHATSAPP_HOOK_EVENTS'`
+2. Check session webhook config in WAHA API:
+   - `curl -sS -H 'X-Api-Key: <WAHA_API_KEY>' http://localhost:3001/api/sessions/default`
+3. Compare webhook URL and events from both sources.
+4. Confirm event overlap:
+   - If `message.any` is present, `message` is redundant and should be removed.
+5. Verify app start response fields:
+   - `webhooksConfigured`
+   - `webhooksSkipReason` (expect `global-webhook-configured` when global webhook already covers the same target/events).
+
+**Recovery:**
+
+- Use one source of webhook registration for the same URL/events:
+  - Option A: keep global WAHA webhook and disable session auto-config (`WAHA_AUTO_CONFIGURE_WEBHOOKS=false`).
+  - Option B: remove global webhook env and keep app-managed session webhook auto-config.
+- Prefer `message.any` only for inbound text-routing; do not pair it with `message` in the same subscription set.
+- Restart WAHA session after configuration changes and re-check `/api/sessions/default`.
+- Verify logs now show one primary route event plus explicit duplicate logs only when retry/duplicate delivery occurs.
+
 ### WAHA Inbound AI 500 (Gemini Provider Misconfiguration)
 
 **Symptoms:**
@@ -146,20 +176,23 @@ requestId:"abc-123" AND level:"error"
 1. Pastikan migration `20260412002000_add_ai_settings_table.sql` sudah diterapkan.
 2. Verifikasi user yang mengubah settings punya role `owner` pada tenant.
 3. Cek isi tabel `ai_settings` untuk `tenant_id` terkait (pastikan kolom tidak kosong semua).
-4. Pastikan webhook WAHA memanggil AI dengan tenant context (fungsi `processGuestFeedback` menerima `tenantId`).
+4. Pastikan webhook WAHA memanggil AI dengan tenant context (fungsi `processPostStayLifecycleConversation` menerima `tenantId`).
 
 **Recovery:**
 
 - Jalankan migration terbaru lalu simpan ulang data AI Settings dari halaman `/settings/ai`.
 - Kirim ulang pesan follow-up dari tamu untuk memicu prompt baru.
-- Aktifkan `AI_FEEDBACK_DEBUG=true` sementara untuk memeriksa step tool-calling dan ringkasan AI.
+- Aktifkan `LIFECYCLE_AI_DEBUG=true` sementara untuk memeriksa step tool-calling dan ringkasan AI.
 
 ### AI Follow-up Language Mismatch / Unexpected Handoff Copy
 
 **Symptoms:**
 
 - Nomor non-Indonesia menerima balasan Bahasa Indonesia.
-- Balasan saat status `completed`/`ignored` tidak sesuai bahasa nomor tamu.
+- Balasan close-out saat status `completed` tidak sesuai bahasa nomor tamu.
+- AI masih membalas otomatis berulang setelah handoff `completed` seharusnya sudah aktif.
+- Guest yang sama punya beberapa reservasi post-stay, tetapi webhook malah mengikuti thread `completed` lama dan mengabaikan reservation aktif yang berbeda.
+- Guest yang sama punya beberapa reservation `completed`, namun sistem tetap `ignored` karena reservation pertama sudah `completed_post_stay_handoff_notified` padahal reservation lain (ID berbeda) belum pernah kirim close-out.
 - AI memanggil update terlalu cepat ketika tamu baru kirim komentar tanpa rating angka.
 
 **Actions:**
@@ -169,17 +202,28 @@ requestId:"abc-123" AND level:"error"
    - `lib/automation/status-trigger.ts`
    - `lib/automation/feedback-escalation.ts`
    - `app/api/webhooks/waha/route.ts`
-3. Konfirmasi status reservasi saat inbound (`post_stay_feedback_status`) apakah `completed`, `ignored`, atau `ai_followup`.
+3. Konfirmasi status reservasi saat inbound (`post_stay_feedback_status`) apakah `completed` atau `ai_followup`.
 4. Jalankan tes terfokus:
    - `pnpm test tests/integration/app/api/webhooks/waha/route.test.ts tests/unit/lib/automation/feedback-escalation.test.ts tests/unit/lib/ai/agent.test.ts`
 5. Verifikasi prompt rule di `lib/ai/agent.ts`:
    - `update_guest_feedback` hanya boleh dipanggil jika rating numerik `1-5` sudah tersedia.
    - Jika tamu kirim komentar dulu, AI harus meminta rating angka terlebih dahulu.
+6. Untuk kasus `completed`, cek `lifecycle_ai_sessions` (`lifecycle_stage='post-stay'`) dan pastikan:
+   - `session_status='handoff'`
+   - `last_action_type='completed_post_stay_handoff_notified'`
+7. Jika satu nomor tamu punya lebih dari satu reservation `checked-out`, pastikan routing memilih prioritas:
+   - `pending` / `ai_followup` lebih dulu
+   - `completed` hanya fallback saat tidak ada reservation post-stay aktif lain
+8. Untuk kasus semua reservation `completed`, verifikasi disambiguasi per reservation ID:
+   - Jika reservation `completed` pertama sudah `completed_post_stay_handoff_notified`, route harus mencoba reservation `completed` lain (`id` berbeda) untuk cek apakah masih boleh kirim close-out sekali.
 
 **Recovery:**
 
 - Perbaiki data nomor tamu di PMS sync jika mismatch sumber data ditemukan.
-- Gunakan output Agentic AI sebagai balasan akhir untuk status `completed`/`ignored`; fallback deterministic hanya dipakai jika provider retryable error (misalnya 429).
+- Untuk status `completed`, sistem hanya mengirim satu pesan penutup AI lalu handoff ke staf; pesan inbound berikutnya tidak di-auto-reply oleh AI.
+- Jika provider retryable error (misalnya `429`) terjadi saat membuat pesan penutup `completed`, route tetap mengirim fallback deterministic dan menyimpan status handoff.
+- Untuk guest dengan multi-reservation, pastikan reservation yang masih `pending`/`ai_followup` dipilih lebih dulu agar rating chat tetap bisa diterima walaupun ada reservation lain yang sudah `completed`.
+- Untuk multi-reservation `completed`, reservation yang sudah notified harus tetap di-ignore, tetapi reservation `completed` lain yang belum notified wajib tetap mengirim satu pesan close-out handoff.
 - Jika `429` sering berulang, isi `GEMINI_FALLBACK_MODEL` agar agent otomatis mencoba model cadangan sebelum masuk fallback manual.
 
 ### Feedback Completed But Guest Points Not Increasing

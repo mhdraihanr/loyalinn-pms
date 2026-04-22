@@ -111,3 +111,27 @@
 
 - **PrestaShop docs** (`/prestashop/docs`): confirmed supported list query parameters (`filter`, `sort`, `limit`) for robust latest-address fallback reads.
 - **Vercel AI SDK docs** (`/vercel/ai`): reconfirmed guidance that system prompts + deterministic settings are recommended for reliable tool-calling flows.
+
+## 15. Task 4.5 Implementation Baseline (2026-04-19)
+
+- **Lifecycle routing is now active in WAHA webhook**:
+  - `app/api/webhooks/waha/route.ts` now resolves reservation lifecycle stage in priority order: `on-stay` -> `pre-arrival` -> eligible `checked-out` (`pending` / `ai_followup` / `completed`).
+  - Inbound/outbound message logs now persist `trigger_type` according to lifecycle stage, not post-stay only.
+- **Lifecycle AI dispatcher and stage agents added**:
+  - `lib/ai/lifecycle-agent.ts` routes calls to stage-specific handlers.
+  - `lib/ai/pre-arrival-agent.ts` handles arrival preparation conversations.
+  - `lib/ai/on-stay-agent.ts` handles in-stay operational requests.
+  - Existing post-stay feedback behavior remains in `lib/ai/agent.ts` and is reused via dispatcher.
+- **Phase-specific tool-calling added**:
+  - `lib/ai/tools.ts` introduces pre-arrival tools: `capture_arrival_eta`, `request_early_checkin`, `escalate_to_human`.
+  - `lib/ai/tools.ts` introduces on-stay tools: `order_in_room_dining`, `request_housekeeping`, `escalate_to_human`.
+  - On-stay tools persist structured records into `room_service_orders` and `housekeeping_requests`.
+- **Lifecycle session persistence and resumability**:
+  - `lib/ai/lifecycle-session.ts` centralizes session upsert behavior.
+  - New migration `supabase/migrations/20260419000100_add_lifecycle_ai_sessions.sql` creates `lifecycle_ai_sessions` to track stage, handoff state, and latest action metadata.
+  - `lib/automation/status-trigger.ts` now updates lifecycle session state when automation sends stage messages.
+- **Idempotency hardening for inbound lifecycle traffic**:
+  - Migration adds unique index `idx_message_logs_inbound_provider_message_per_trigger_unique` on `(tenant_id, trigger_type, provider_message_id)` for inbound message dedupe across lifecycle stages.
+- **Focused verification snapshot**:
+  - `pnpm test tests/unit/lib/ai/lifecycle-agent.test.ts tests/integration/app/api/webhooks/waha/route.test.ts tests/integration/lib/automation/status-trigger.test.ts`
+  - Result: `3` files passed, `24` tests passed, `0` failed.

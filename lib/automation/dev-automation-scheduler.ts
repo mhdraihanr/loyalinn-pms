@@ -14,6 +14,7 @@ type DevelopmentAutomationSchedulerState = {
   intervalId: ReturnType<typeof setInterval>;
   intervalMs: number;
   isRunning: boolean;
+  overlapWarningLogged: boolean;
   stop: () => void;
 };
 
@@ -69,13 +70,17 @@ async function executeWorker(options: {
   state: DevelopmentAutomationSchedulerState;
 }) {
   if (options.state.isRunning) {
-    options.logger.warn(
-      "Skipping development automation tick because the previous run is still in progress.",
-    );
+    if (!options.state.overlapWarningLogged) {
+      options.logger.warn(
+        "Skipping development automation tick because the previous run is still in progress.",
+      );
+      options.state.overlapWarningLogged = true;
+    }
     return;
   }
 
   options.state.isRunning = true;
+  options.state.overlapWarningLogged = false;
 
   try {
     await options.runWorker();
@@ -126,6 +131,7 @@ export function startDevelopmentAutomationScheduler(
     }, intervalMs),
     intervalMs,
     isRunning: false,
+    overlapWarningLogged: false,
     stop: () => {
       clearInterval(state.intervalId);
       globalThis.__developmentAutomationScheduler = undefined;

@@ -215,6 +215,26 @@ CREATE TABLE ai_settings (
 );
 
 -- ============================================================
+-- LIFECYCLE AI SESSIONS
+-- ============================================================
+CREATE TABLE lifecycle_ai_sessions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+  guest_id UUID REFERENCES guests(id) ON DELETE SET NULL,
+  lifecycle_stage TEXT NOT NULL CHECK (lifecycle_stage IN ('pre-arrival', 'on-stay', 'post-stay')),
+  session_status TEXT NOT NULL DEFAULT 'active' CHECK (session_status IN ('active', 'resolved', 'handoff')),
+  needs_human_follow_up BOOLEAN NOT NULL DEFAULT FALSE,
+  last_action_type TEXT,
+  last_action_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  last_inbound_message_at TIMESTAMPTZ,
+  last_outbound_message_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(tenant_id, reservation_id, lifecycle_stage)
+);
+
+-- ============================================================
 -- INBOUND EVENTS (dedupe / idempotency)
 -- ============================================================
 CREATE TABLE inbound_events (
@@ -366,6 +386,7 @@ ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_template_variants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lifecycle_ai_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbound_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE automation_jobs ENABLE ROW LEVEL SECURITY;
 
@@ -477,6 +498,10 @@ CREATE POLICY "Owners can manage AI settings" ON ai_settings
   FOR ALL USING (public.is_tenant_owner(tenant_id))
   WITH CHECK (public.is_tenant_owner(tenant_id));
 
+-- LIFECYCLE AI SESSIONS: all members can manage
+CREATE POLICY "Members can manage lifecycle AI sessions" ON lifecycle_ai_sessions
+  FOR ALL USING (tenant_id = public.get_user_tenant_id());
+
 -- INBOUND EVENTS: service role only (webhooks)
 CREATE POLICY "Service role manages inbound events" ON inbound_events
   FOR ALL USING (true);
@@ -505,6 +530,9 @@ CREATE INDEX idx_message_logs_trigger_type ON message_logs(trigger_type);
 CREATE INDEX idx_message_logs_automation_job_id ON message_logs(automation_job_id);
 CREATE INDEX idx_message_logs_status ON message_logs(status);
 CREATE UNIQUE INDEX idx_message_logs_inbound_post_stay_provider_message_unique ON message_logs(tenant_id, provider_message_id) WHERE direction = 'inbound' AND trigger_type = 'post-stay' AND provider_message_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_message_logs_inbound_provider_message_per_trigger_unique ON message_logs(tenant_id, trigger_type, provider_message_id) WHERE direction = 'inbound' AND provider_message_id IS NOT NULL;
+CREATE INDEX idx_lifecycle_ai_sessions_tenant_stage ON lifecycle_ai_sessions(tenant_id, lifecycle_stage);
+CREATE INDEX idx_lifecycle_ai_sessions_follow_up ON lifecycle_ai_sessions(tenant_id, needs_human_follow_up, session_status);
 CREATE INDEX idx_inbound_events_event_id ON inbound_events(event_id);
 CREATE INDEX idx_inbound_events_tenant_idempotency_key ON inbound_events(tenant_id, idempotency_key);
 CREATE INDEX idx_automation_jobs_status ON automation_jobs(status);

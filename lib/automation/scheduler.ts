@@ -35,12 +35,26 @@ async function enqueueIfMissing(
   triggerType: "pre-arrival" | "post-stay",
 ) {
   const adminClient = createAdminClient();
-  const { data: existingJob } = await adminClient
+  const { data: existingJob, error: existingJobError } = await adminClient
     .from("automation_jobs")
     .select("id")
     .eq("reservation_id", reservation.id)
     .eq("trigger_type", triggerType)
     .maybeSingle();
+
+  if (existingJobError) {
+    const message = existingJobError.message ?? "";
+
+    // maybeSingle expects at most one row.
+    // If historical duplicates already exist, treat it as "job exists" to avoid enqueue loops.
+    if (
+      /multiple rows|more than one row|json object requested/i.test(message)
+    ) {
+      return false;
+    }
+
+    throw new Error(message || "Failed to lookup existing automation job");
+  }
 
   if (existingJob) {
     return false;

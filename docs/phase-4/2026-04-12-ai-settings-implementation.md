@@ -69,9 +69,9 @@ Implemented:
 
 Behavior:
 
-- webhook now passes `tenantId` to `processGuestFeedback`
+- webhook now passes `tenantId` to `processPostStayLifecycleConversation`
 - AI layer reads tenant settings from `ai_settings`
-- `buildGuestFeedbackSystemPrompt` composes final system prompt using:
+- `buildPostStayLifecycleSystemPrompt` composes final system prompt using:
   - tenant overrides when provided
   - reservation hotel fallback
   - safe defaults when settings empty
@@ -111,7 +111,7 @@ Full suite note:
 
 Scope added after initial implementation record:
 
-- `processGuestFeedback` now receives `preferredLanguage` (`id`/`en`) so prompt/tool copy can stay consistent with phone-based language routing.
+- `processPostStayLifecycleConversation` now receives `preferredLanguage` (`id`/`en`) so prompt/tool copy can stay consistent with phone-based language routing.
 - WAHA webhook flow now passes language context into AI processing and uses deterministic bilingual handoff fallback for terminal states (`completed`, `ignored`).
 - Handoff fallback no longer depends on env template variables.
 
