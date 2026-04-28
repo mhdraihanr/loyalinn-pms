@@ -104,8 +104,8 @@ describe("GET /api/cron/pms-sync", () => {
     expect(mocks.runAutoSyncForTenantMock).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        startDate: "2026-02-05",
-        endDate: "2026-04-06",
+        startDate: "2026-03-04",
+        endDate: "2026-05-06",
       }),
     );
     expect(json).toEqual({

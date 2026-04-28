@@ -658,7 +658,8 @@ Current Status (2026-04-16):
 - ✅ Task 4.4 is implemented end-to-end and currently verified by focused automated tests (see Verification Snapshot under Task 4.4).
 - ✅ Task 4.5 baseline is implemented: lifecycle routing now covers `pre-arrival`, `on-stay`, and `post-stay` in WAHA webhook flow with phase-specific agent entrypoints.
 - ✅ Lifecycle session persistence is implemented via `lifecycle_ai_sessions` (tracking stage, handoff state, and last action metadata).
-- 🚧 Operations dashboard for AI-generated requests is not implemented yet.
+- ✅ Operations dashboard for AI-generated housekeeping, room-service, and arrival requests is implemented.
+- ✅ Pre-arrival ETA capture and early check-in requests now create first-class `arrival_requests` rows for front office triage while preserving lifecycle session tracking.
 
 Implemented files tracked for Phase 4 to date (Tasks 1-8):
 
@@ -801,6 +802,8 @@ Current implementation status:
 - ✅ Optimized `pms-sync-cron.ts` lookback window from 30 days to 3 days to maximize processing speed.
 - ✅ PMS polling is connected to automation ingestion through `lib/pms/auto-sync-service.ts`.
 - ✅ Local development startup now supports separate `DEV_PMS_SYNC_INTERVAL_MS` and `DEV_AUTOMATION_SYNC_INTERVAL_MS` intervals for the two schedulers.
+- ✅ Development auto-schedulers can now be disabled explicitly with `DEV_PMS_SYNC_ENABLED=false` and `DEV_AUTOMATION_SYNC_ENABLED=false` for manual cron testing; legacy `DEV_*_SYNC_INTERVAL_MS=false` is also treated as disabled.
+- ✅ Retryable automation jobs are now re-queued to `pending` with future `available_at` timestamps so the worker can claim them again after the retry window, instead of getting stranded in `failed`.
 - ✅ Production scheduling is defined through `vercel.json` for `/api/cron/pms-sync` every 5 minutes and `/api/cron/automation` every minute.
 - ✅ Completing post-stay feedback now awards loyalty points (`+50`) to the related guest exactly once via Supabase RPC `complete_post_stay_feedback_with_reward`.
 - ✅ Reward logic is shared by both web form submit route and AI feedback tool to keep behavior consistent and idempotent.
@@ -810,9 +813,11 @@ Current implementation status:
 - ✅ Feedback Monitor dashboard page (`/feedback`) is implemented with status cards, tenant-scoped table, and detail modal showing full comments + feedback link.
 - ✅ WAHA inbound webhook integration (`app/api/webhooks/waha/route.ts`) and `lib/ai/agent.ts` tool-calling are implemented for AI-assisted follow-up replies.
 - ✅ AI provider has been migrated from OpenRouter to Gemini API via `@ai-sdk/google` (`aiProvider(AI_MODEL)`), keeping WAHA AI follow-up flow on a native provider path.
+- ✅ Gemini configuration is now intentionally simplified to a single production model setting: `GEMINI_MODEL=gemini-2.5-flash` for lifecycle and post-stay AI flows.
+- ✅ Lifecycle and post-stay AI now use budgeted message history instead of replaying the full `message_logs` transcript on every request, reducing repeated prompt tokens while preserving recent context.
 - ✅ WAHA AI follow-up webhook now degrades gracefully on retryable provider failures (including Gemini `429`), returning deterministic fallback reply with HTTP `200` instead of propagating `500`.
 - ✅ Agent prompt now enforces numeric rating-first behavior (`1-5`) before calling `update_guest_feedback`, reducing premature tool-call attempts when guests send comments first.
-- ✅ If primary model is rate-limited and `GEMINI_FALLBACK_MODEL` is configured, AI follow-up automatically retries with fallback model before webhook-level fallback reply is used.
+- ✅ Retryable Gemini provider failures now rely on deterministic webhook fallback/handoff responses instead of maintaining a second model configuration path.
 - ✅ Automatic scheduler escalation after 24 hours (`pending` -> `ai_followup`) is implemented in `lib/automation/feedback-escalation.ts`.
 - ✅ Follow-up kickoff message is now template-driven from Message Templates tab `post-stay-ai-followup` (not hardcoded).
 - ✅ Cron summary responses now expose `aiFollowupEscalated` and are validated at route level (`/api/cron/automation` and `/api/dev/scheduler`).
@@ -845,7 +850,7 @@ Use cases:
   5. The AI directly chats with the guest in a highly personalized manner: _"Halo [Nama], terima kasih sudah menginap di [Tipe Kamar] selama 3 malam kemarin. Bagaimana pengalaman Anda? Apakah ada masukan untuk kami?"_
   6. **Function Calling & Summarization:** AI parses the guest's unstructured chat reply, summarizes it, and calls `update_guest_feedback(rating, comments)` to save structured data back to the database, identical to the Web Form output.
 
-### Task 4.5: Lifecycle Agentic AI Orchestration (Pre-arrival, On-stay, Post-stay) 🚧
+### Task 4.5: Lifecycle Agentic AI Orchestration (Pre-arrival, On-stay, Post-stay) ✅ COMPLETED (Baseline)
 
 Files:
 
@@ -864,6 +869,9 @@ Implementation snapshot (2026-04-19):
 - ✅ WAHA webhook now selects reservation lifecycle stage in priority order (`on-stay` -> `pre-arrival` -> eligible `checked-out`) and stores message history per stage trigger.
 - ✅ Pre-arrival tools (`capture_arrival_eta`, `request_early_checkin`, `escalate_to_human`) are implemented.
 - ✅ On-stay tools (`order_in_room_dining`, `request_housekeeping`, `escalate_to_human`) are implemented.
+- ✅ Lifecycle AI configuration has been cleaned up to use one shared Gemini model (`gemini-2.5-flash`) across pre-arrival, on-stay, and post-stay orchestration, removing the previous lite/fallback split.
+- ✅ WAHA lifecycle routing now budgets AI context to the most recent conversation tail plus a deterministic summary of trimmed history, reducing token spend without adding an extra summarization model call.
+- ✅ Lifecycle and post-stay debug logs now expose message-count and token-usage snapshots when the provider returns usage metadata.
 - ✅ Session resumability metadata is persisted to `lifecycle_ai_sessions` for inbound/outbound events and handoff/fallback states.
 - ✅ Inbound dedupe has been expanded with unique key `(tenant_id, trigger_type, provider_message_id)` for lifecycle-safe processing.
 
@@ -884,7 +892,7 @@ Lifecycle use cases:
   1. Guest asks arrival preparation questions (early check-in, airport transfer, check-in requirements, add-ons).
   2. WAHA webhook routes inbound chat to pre-arrival agent with reservation + guest context.
   3. Agent answers directly and can call approved tools (e.g., `capture_arrival_eta`, `request_early_checkin`, `escalate_to_human`).
-  4. Actions are logged and stored for staff follow-up.
+  4. ETA and early check-in actions are logged in `lifecycle_ai_sessions` and stored as `arrival_requests` rows for staff follow-up.
 - **On-stay Agentic Assistant:**
   1. Guest requests room-service, housekeeping, or in-stay support via WhatsApp.
   2. Agent calls operational tools (e.g., `order_in_room_dining`, `request_housekeeping`) and confirms outcomes.
@@ -899,21 +907,25 @@ Control & reliability requirements:
 - Use step-bounded multi-step tool-calling with explicit loop control and phase-specific tool access.
 - Keep deterministic safety boundaries for sensitive actions (tool approval/escalation policy).
 - Persist inbound/outbound conversation context per reservation for consistent agent routing and resumability.
+- Budget long chat history before model calls so repeated WhatsApp exchanges do not resend the full transcript every time.
 - Preserve existing idempotency, dedupe, and retry guarantees in webhook + automation worker flows.
 
-### Task 4.6: Operations Dashboard (Housekeeping & Room Service) 🚧
+### Task 4.6: Operations Dashboard (Housekeeping, Room Service, Arrival Requests) ✅ COMPLETED
 
 Files:
 
 - Create: a-proposal2/app/(dashboard)/operations/page.tsx
 - Create: a-proposal2/components/operations/housekeeping-table.tsx
 - Create: a-proposal2/components/operations/room-service-table.tsx
+- Create: a-proposal2/components/operations/arrival-requests-table.tsx
+- Create: a-proposal2/supabase/migrations/20260428000000_add_arrival_requests.sql
 
 Features:
 
 - A dedicated UI page mapped under the "OPERATIONS" sidebar group.
-- Real-time or polled lists of `housekeeping_requests` and `room_service_orders` generated by lifecycle Agentic AI (primarily on-stay).
-- Actions to mark requests as "In Progress" or "Completed".
+- Real-time or polled lists of `housekeeping_requests`, `room_service_orders`, and `arrival_requests` generated by lifecycle Agentic AI.
+- Actions to mark housekeeping and room-service requests as "In Progress" or "Completed".
+- Actions to mark arrival requests as "In Progress", "Resolved", or "Cancelled".
 
 Acceptance Criteria (Phase 4):
 
@@ -922,7 +934,7 @@ Acceptance Criteria (Phase 4):
 - ✅ Scheduled jobs execute in expected windows
 - ✅ Staff can monitor post-stay feedback from dashboard `/feedback`, including detail view for full comments and feedback link.
 - ✅ Agentic AI routing is active across `pre-arrival`, `on-stay`, and `post-stay` lifecycle steps with phase-specific tools and guardrails.
-- 🚧 Staff can view and update AI-generated requests in the Operations dashboard.
+- ✅ Staff can view and update AI-generated requests in the Operations dashboard, including pre-arrival ETA and early check-in follow-up.
 
 ---
 

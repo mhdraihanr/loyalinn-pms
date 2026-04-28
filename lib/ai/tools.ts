@@ -49,6 +49,32 @@ async function markAction(
   });
 }
 
+async function insertArrivalRequest(
+  context: LifecycleToolContext,
+  input: {
+    requestType: "arrival_eta" | "early_checkin";
+    eta?: string | null;
+    requestedTime?: string | null;
+    details: Record<string, unknown>;
+  },
+) {
+  const { error } = await context.supabase.from("arrival_requests").insert({
+    tenant_id: context.tenantId,
+    reservation_id: context.reservationId,
+    guest_id: context.guestId,
+    room_number: normalizeRoomNumber(context.roomNumber),
+    request_type: input.requestType,
+    eta: input.eta ?? null,
+    requested_time: input.requestedTime ?? null,
+    details: input.details,
+    status: "pending",
+  });
+
+  if (error) {
+    throw error;
+  }
+}
+
 export function createPreArrivalTools(context: LifecycleToolContext) {
   return {
     capture_arrival_eta: tool({
@@ -64,6 +90,15 @@ export function createPreArrivalTools(context: LifecycleToolContext) {
       }),
       execute: async ({ eta, notes }) => {
         try {
+          await insertArrivalRequest(context, {
+            requestType: "arrival_eta",
+            eta,
+            requestedTime: null,
+            details: {
+              notes: notes ?? null,
+            },
+          });
+
           await markAction(context, {
             actionType: "capture_arrival_eta",
             actionPayload: {
@@ -105,6 +140,15 @@ export function createPreArrivalTools(context: LifecycleToolContext) {
       }),
       execute: async ({ requested_time, reason }) => {
         try {
+          await insertArrivalRequest(context, {
+            requestType: "early_checkin",
+            eta: null,
+            requestedTime: requested_time,
+            details: {
+              reason: reason ?? null,
+            },
+          });
+
           await markAction(context, {
             actionType: "request_early_checkin",
             actionPayload: {

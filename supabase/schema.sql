@@ -127,7 +127,7 @@ CREATE TABLE room_service_orders (
   room_number TEXT NOT NULL,
   items JSONB NOT NULL,
   total_amount DECIMAL(10, 2),
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'preparing', 'delivered', 'cancelled')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in-progress', 'completed', 'cancelled')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -143,6 +143,24 @@ CREATE TABLE housekeeping_requests (
   room_number TEXT NOT NULL,
   request_type TEXT NOT NULL CHECK (request_type IN ('cleaning', 'extra_items', 'maintenance', 'other')),
   details JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in-progress', 'resolved', 'cancelled')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- ARRIVAL REQUESTS
+-- ============================================================
+CREATE TABLE arrival_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+  guest_id UUID NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+  room_number TEXT NOT NULL,
+  request_type TEXT NOT NULL CHECK (request_type IN ('arrival_eta', 'early_checkin')),
+  eta TEXT,
+  requested_time TEXT,
+  details JSONB NOT NULL DEFAULT '{}'::jsonb,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in-progress', 'completed', 'cancelled')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -382,6 +400,7 @@ ALTER TABLE guests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reservations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE room_service_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE housekeeping_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE arrival_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_template_variants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
@@ -468,11 +487,18 @@ CREATE POLICY "Members can manage reservations" ON reservations
 
 -- ROOM SERVICE ORDERS: all members can manage
 CREATE POLICY "Members can manage room service orders" ON room_service_orders
-  FOR ALL USING (tenant_id = public.get_user_tenant_id());
+  FOR ALL USING (tenant_id = public.get_user_tenant_id())
+  WITH CHECK (tenant_id = public.get_user_tenant_id());
 
 -- HOUSEKEEPING REQUESTS: all members can manage
 CREATE POLICY "Members can manage housekeeping requests" ON housekeeping_requests
-  FOR ALL USING (tenant_id = public.get_user_tenant_id());
+  FOR ALL USING (tenant_id = public.get_user_tenant_id())
+  WITH CHECK (tenant_id = public.get_user_tenant_id());
+
+-- ARRIVAL REQUESTS: all members can manage
+CREATE POLICY "Members can manage arrival requests" ON arrival_requests
+  FOR ALL USING (tenant_id = public.get_user_tenant_id())
+  WITH CHECK (tenant_id = public.get_user_tenant_id());
 
 -- MESSAGE TEMPLATES: all members can manage
 CREATE POLICY "Members can manage templates" ON message_templates
@@ -524,6 +550,9 @@ CREATE INDEX idx_room_service_tenant_id ON room_service_orders(tenant_id);
 CREATE INDEX idx_room_service_status ON room_service_orders(status);
 CREATE INDEX idx_housekeeping_tenant_id ON housekeeping_requests(tenant_id);
 CREATE INDEX idx_housekeeping_status ON housekeeping_requests(status);
+CREATE INDEX idx_arrival_requests_tenant_id ON arrival_requests(tenant_id);
+CREATE INDEX idx_arrival_requests_status ON arrival_requests(status);
+CREATE INDEX idx_arrival_requests_reservation_id ON arrival_requests(reservation_id);
 CREATE INDEX idx_message_template_variants_template_id ON message_template_variants(template_id);
 CREATE INDEX idx_message_logs_tenant_id ON message_logs(tenant_id);
 CREATE INDEX idx_message_logs_trigger_type ON message_logs(trigger_type);

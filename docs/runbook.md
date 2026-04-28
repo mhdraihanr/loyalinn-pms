@@ -86,8 +86,11 @@ requestId:"abc-123" AND level:"error"
 **Recovery:**
 
 - Failed messages will retry per retry policy
+- Retryable automation jobs are re-queued as `pending` with a future `available_at`; they are claimable again once that time is reached
 - Reconnect WhatsApp session via QR
 - Check dead-letter queue for unrecoverable failures
+- In local `pnpm dev`, remember the in-process development automation scheduler may consume the retried job before a manual `curl /api/cron/automation` call, so the route summary can show zeros even though the database row already changed
+- The development `Developer Time Machine` / `/api/dev/scheduler` is useful for scheduler-window testing, but it is not a reliable proof tool for retry eligibility because queue claiming still depends on database `NOW()` and real `available_at`
 
 ### WAHA Webhook Delivered 4x / Repeated Inbound Calls
 
@@ -182,7 +185,7 @@ requestId:"abc-123" AND level:"error"
 
 - Jalankan migration terbaru lalu simpan ulang data AI Settings dari halaman `/settings/ai`.
 - Kirim ulang pesan follow-up dari tamu untuk memicu prompt baru.
-- Aktifkan `LIFECYCLE_AI_DEBUG=true` sementara untuk memeriksa step tool-calling dan ringkasan AI.
+- Aktifkan `LIFECYCLE_AI_DEBUG=true` sementara untuk memeriksa step tool-calling, jumlah message context yang dikirim ke model, dan snapshot token usage bila provider mengembalikannya.
 
 ### AI Follow-up Language Mismatch / Unexpected Handoff Copy
 
@@ -224,7 +227,7 @@ requestId:"abc-123" AND level:"error"
 - Jika provider retryable error (misalnya `429`) terjadi saat membuat pesan penutup `completed`, route tetap mengirim fallback deterministic dan menyimpan status handoff.
 - Untuk guest dengan multi-reservation, pastikan reservation yang masih `pending`/`ai_followup` dipilih lebih dulu agar rating chat tetap bisa diterima walaupun ada reservation lain yang sudah `completed`.
 - Untuk multi-reservation `completed`, reservation yang sudah notified harus tetap di-ignore, tetapi reservation `completed` lain yang belum notified wajib tetap mengirim satu pesan close-out handoff.
-- Jika `429` sering berulang, isi `GEMINI_FALLBACK_MODEL` agar agent otomatis mencoba model cadangan sebelum masuk fallback manual.
+- Jika `429` sering berulang, pertahankan `GEMINI_MODEL=gemini-2.5-flash` dan andalkan fallback manual/deterministik yang sudah ada di webhook flow.
 
 ### Feedback Completed But Guest Points Not Increasing
 
@@ -272,6 +275,28 @@ requestId:"abc-123" AND level:"error"
 - Idempotency prevents duplicate processing
 - Replay failed events manually if needed
 - Update webhook secret if compromised
+
+### Arrival Requests Not Showing
+
+**Symptoms:**
+
+- Guest shares ETA or asks for early check-in, but `/operations` does not show a row in the Arrival Requests tab.
+- Early check-in request is visible in chat history but front office has no pending queue item.
+- Arrival Requests tab does not update live after the AI tool runs.
+
+**Actions:**
+
+1. Verify migration `20260428000000_add_arrival_requests.sql` has been applied.
+2. Check `arrival_requests` for the target `tenant_id`, `reservation_id`, and `request_type` (`arrival_eta` or `early_checkin`).
+3. Confirm `lib/ai/tools.ts` executed `capture_arrival_eta` or `request_early_checkin` and still updated `lifecycle_ai_sessions`.
+4. Confirm the request status is active: `pending` or `in-progress`. Resolved/cancelled rows are intentionally hidden from the default Operations view.
+5. If realtime updates fail but refresh works, verify `arrival_requests` is in the `supabase_realtime` publication.
+
+**Recovery:**
+
+- Apply the missing migration and reload `/operations`.
+- Re-send the guest message or manually insert a tenant-scoped `arrival_requests` row only if the original AI tool call did not persist.
+- For early check-in, staff should move the row through `pending` -> `in-progress` -> `resolved` or `cancelled` after human review.
 
 ### Database Issues
 
