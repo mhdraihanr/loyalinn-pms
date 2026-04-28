@@ -73,6 +73,7 @@ describe("lifecycle stage agent observability", () => {
         onStepFinish: expect.any(Function),
       }),
     );
+    expect(mocks.aiProviderMock).toHaveBeenCalledWith("test-model");
 
     const onStepFinish = mocks.generateTextMock.mock.calls[0]?.[0]
       ?.onStepFinish as (event: {
@@ -125,6 +126,7 @@ describe("lifecycle stage agent observability", () => {
         onStepFinish: expect.any(Function),
       }),
     );
+    expect(mocks.aiProviderMock).toHaveBeenCalledWith("test-model");
 
     const onStepFinish = mocks.generateTextMock.mock.calls[0]?.[0]
       ?.onStepFinish as (event: {

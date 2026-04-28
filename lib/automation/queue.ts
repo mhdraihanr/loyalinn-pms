@@ -78,7 +78,7 @@ export async function rescheduleAutomationJob(
   { retryCount, nextRetryAt, errorCategory, errorMessage }: RescheduleOptions,
 ) {
   await updateAutomationJob(jobId, {
-    status: "failed",
+    status: "pending",
     retry_count: retryCount,
     available_at: nextRetryAt.toISOString(),
     last_error_category: errorCategory,

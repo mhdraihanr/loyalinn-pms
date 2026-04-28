@@ -8,6 +8,7 @@ type SchedulerEnvironment = {
   nodeEnv?: string;
   nextRuntime?: string;
   intervalMs?: string;
+  enabled?: string;
 };
 
 type DevelopmentAutomationSchedulerState = {
@@ -57,9 +58,21 @@ function resolveIntervalMs(options: {
     : DEFAULT_INTERVAL_MS;
 }
 
+function isExplicitlyDisabled(value: string | undefined) {
+  return value?.trim().toLowerCase() === "false";
+}
+
 function shouldStartScheduler(environment?: SchedulerEnvironment) {
   const nodeEnv = environment?.nodeEnv ?? process.env.NODE_ENV;
   const nextRuntime = environment?.nextRuntime ?? process.env.NEXT_RUNTIME;
+  const enabled =
+    environment?.enabled ?? process.env.DEV_AUTOMATION_SYNC_ENABLED;
+  const rawInterval =
+    environment?.intervalMs ?? process.env.DEV_AUTOMATION_SYNC_INTERVAL_MS;
+
+  if (isExplicitlyDisabled(enabled) || isExplicitlyDisabled(rawInterval)) {
+    return false;
+  }
 
   return nodeEnv === "development" && nextRuntime === "nodejs";
 }
@@ -101,6 +114,8 @@ export function startDevelopmentAutomationScheduler(
     intervalMs:
       options.environment?.intervalMs ??
       process.env.DEV_AUTOMATION_SYNC_INTERVAL_MS,
+    enabled:
+      options.environment?.enabled ?? process.env.DEV_AUTOMATION_SYNC_ENABLED,
   };
   const intervalMs = resolveIntervalMs({
     intervalMs: options.intervalMs,

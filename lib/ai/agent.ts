@@ -1,6 +1,9 @@
 import { generateText, stepCountIs, tool, type ModelMessage } from "ai";
 import { z } from "zod";
-import { aiProvider, AI_FALLBACK_MODEL, AI_MODEL } from "./provider";
+import {
+  aiProvider,
+  AI_MODEL,
+} from "./provider";
 import { createAdminClient } from "../supabase/admin";
 import {
   completePostStayFeedbackWithReward,
@@ -10,6 +13,20 @@ import {
 const ENABLE_LIFECYCLE_AI_DEBUG =
   process.env.LIFECYCLE_AI_DEBUG === "true" ||
   process.env.AI_FEEDBACK_DEBUG === "true";
+
+function getUsageSnapshot(result: {
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
+}) {
+  return {
+    inputTokens: result.usage?.inputTokens ?? null,
+    outputTokens: result.usage?.outputTokens ?? null,
+    totalTokens: result.usage?.totalTokens ?? null,
+  };
+}
 
 type AiSettingsPromptContext = {
   hotel_name: string | null;
@@ -329,19 +346,15 @@ export async function generatePostStayCompletionHandoffReply(
     });
   };
 
-  let result;
+  const result = await runGenerateText(AI_MODEL);
 
-  try {
-    result = await runGenerateText(AI_MODEL);
-  } catch (error: unknown) {
-    const fallbackModel = AI_FALLBACK_MODEL.trim();
-    const canFallback = fallbackModel.length > 0 && fallbackModel !== AI_MODEL;
-
-    if (!canFallback || !isRetryableProviderRateLimitError(error)) {
-      throw error;
-    }
-
-    result = await runGenerateText(fallbackModel);
+  if (ENABLE_LIFECYCLE_AI_DEBUG) {
+    console.info("[Lifecycle AI][Post-stay handoff] Summary", {
+      reservationId: params.reservationId,
+      model: AI_MODEL,
+      inputMessageCount: params.messageHistory.length,
+      usage: getUsageSnapshot(result),
+    });
   }
 
   return {
@@ -511,31 +524,8 @@ export async function processPostStayLifecycleConversation(
     });
   };
 
-  let usedModel = AI_MODEL;
-  let result;
-
-  try {
-    result = await runGenerateText(AI_MODEL);
-  } catch (error: unknown) {
-    const fallbackModel = AI_FALLBACK_MODEL.trim();
-    const canFallback = fallbackModel.length > 0 && fallbackModel !== AI_MODEL;
-
-    if (!canFallback || !isRetryableProviderRateLimitError(error)) {
-      throw error;
-    }
-
-    console.warn(
-      "Lifecycle AI provider rate-limit detected, retrying with fallback model",
-      {
-        reservationId,
-        primaryModel: AI_MODEL,
-        fallbackModel,
-      },
-    );
-
-    usedModel = fallbackModel;
-    result = await runGenerateText(fallbackModel);
-  }
+  const usedModel = AI_MODEL;
+  const result = await runGenerateText(AI_MODEL);
 
   if (ENABLE_LIFECYCLE_AI_DEBUG) {
     const allToolCalls = (result.steps ?? []).flatMap(
@@ -558,9 +548,11 @@ export async function processPostStayLifecycleConversation(
     console.info("[Lifecycle AI][Post-stay] Summary", {
       reservationId,
       model: usedModel,
+      inputMessageCount: messageHistory.length,
       steps: result.steps?.length ?? 0,
       toolCalls: allToolCalls.length,
       toolErrors,
+      usage: getUsageSnapshot(result),
     });
 
     if (allToolCalls.length === 0 && looksLikeDirectPostStayFeedback) {

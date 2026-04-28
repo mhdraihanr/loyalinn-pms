@@ -61,7 +61,7 @@ describe("completeAutomationJob", () => {
 });
 
 describe("rescheduleAutomationJob", () => {
-  it("marks retryable jobs failed and assigns the next available time", async () => {
+  it("returns retryable jobs to pending and assigns the next available time", async () => {
     eqMock.mockResolvedValue({ error: null });
     const nextRetryAt = new Date("2026-03-07T12:05:00.000Z");
 
@@ -74,7 +74,7 @@ describe("rescheduleAutomationJob", () => {
 
     expect(updateMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: "failed",
+        status: "pending",
         retry_count: 2,
         available_at: nextRetryAt.toISOString(),
         last_error_category: "retryable",

@@ -15,6 +15,8 @@
 - **Feature**: Added a new Development Tool UI at `components/settings/developer-time-machine.tsx` backed by an API route `/api/dev/scheduler`.
 - **Purpose**: Allows admins/developers to simulate the cron worker running at any specific past or future date.
 - **Details**: This tool bypasses the standard production UTC locking time constraints. It executes `runAutomationCron` with `{ forceSchedule: true }`, making it significantly easier to test `pre-arrival` and `post-stay` orchestration behaviors, especially in multi-tenant test environments.
+- **Limit**: This tool does not alter database `NOW()` inside the queue-claiming SQL helper. As a result, it is suitable for scheduler-window validation, but not as a primary proof mechanism for retry jobs that are still waiting on real `available_at` time.
+- **Local control**: Development auto-schedulers can now be disabled explicitly with `DEV_PMS_SYNC_ENABLED=false` and `DEV_AUTOMATION_SYNC_ENABLED=false` (or legacy `DEV_*_SYNC_INTERVAL_MS=false`) when manual `curl`-driven testing is preferred.
 
 ## 4. Next.js Aggressive Caching (Cache-busting)
 

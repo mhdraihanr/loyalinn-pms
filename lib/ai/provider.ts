@@ -22,6 +22,3 @@ export const aiProvider = createGoogleGenerativeAI({
 
 // Primary Gemini model.
 export const AI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-
-// Optional fallback model for retryable provider failures (e.g. 429 rate-limit).
-export const AI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "";

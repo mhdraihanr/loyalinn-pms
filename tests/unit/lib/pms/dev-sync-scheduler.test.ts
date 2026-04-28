@@ -7,14 +7,28 @@ import {
 
 describe("startDevelopmentPmsSyncScheduler", () => {
   const defaultIntervalMs = 10_000;
+  const originalDevPmsIntervalMs = process.env.DEV_PMS_SYNC_INTERVAL_MS;
+  const originalDevPmsEnabled = process.env.DEV_PMS_SYNC_ENABLED;
 
   beforeEach(() => {
     vi.useFakeTimers();
+    delete process.env.DEV_PMS_SYNC_INTERVAL_MS;
+    delete process.env.DEV_PMS_SYNC_ENABLED;
     resetDevelopmentPmsSyncSchedulerForTests();
   });
 
   afterEach(() => {
     resetDevelopmentPmsSyncSchedulerForTests();
+    if (originalDevPmsIntervalMs) {
+      process.env.DEV_PMS_SYNC_INTERVAL_MS = originalDevPmsIntervalMs;
+    } else {
+      delete process.env.DEV_PMS_SYNC_INTERVAL_MS;
+    }
+    if (originalDevPmsEnabled) {
+      process.env.DEV_PMS_SYNC_ENABLED = originalDevPmsEnabled;
+    } else {
+      delete process.env.DEV_PMS_SYNC_ENABLED;
+    }
     vi.useRealTimers();
   });
 
@@ -118,5 +132,41 @@ describe("startDevelopmentPmsSyncScheduler", () => {
     await vi.advanceTimersByTimeAsync(defaultIntervalMs);
 
     expect(runSync).toHaveBeenCalledTimes(2);
+  });
+
+  it("stays disabled when DEV_PMS_SYNC_ENABLED is false", async () => {
+    process.env.DEV_PMS_SYNC_ENABLED = "false";
+    const runSync = vi.fn().mockResolvedValue(undefined);
+
+    const result = startDevelopmentPmsSyncScheduler({
+      runSync,
+      environment: {
+        nodeEnv: "development",
+        nextRuntime: "nodejs",
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(defaultIntervalMs);
+
+    expect(result.started).toBe(false);
+    expect(runSync).not.toHaveBeenCalled();
+  });
+
+  it("stays disabled when DEV_PMS_SYNC_INTERVAL_MS is false", async () => {
+    process.env.DEV_PMS_SYNC_INTERVAL_MS = "false";
+    const runSync = vi.fn().mockResolvedValue(undefined);
+
+    const result = startDevelopmentPmsSyncScheduler({
+      runSync,
+      environment: {
+        nodeEnv: "development",
+        nextRuntime: "nodejs",
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(defaultIntervalMs);
+
+    expect(result.started).toBe(false);
+    expect(runSync).not.toHaveBeenCalled();
   });
 });

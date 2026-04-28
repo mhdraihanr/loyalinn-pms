@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS room_service_orders (
   room_number TEXT NOT NULL,
   items JSONB NOT NULL, -- Array of items: [{ name: 'Nasi Goreng', quantity: 1, notes: 'Pedas' }]
   total_amount DECIMAL(10, 2),
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'preparing', 'delivered', 'cancelled')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in-progress', 'completed', 'cancelled')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -41,11 +41,13 @@ ALTER TABLE housekeeping_requests ENABLE ROW LEVEL SECURITY;
 
 -- ROOM SERVICE ORDERS: all members can manage
 CREATE POLICY "Members can manage room service orders" ON room_service_orders
-  FOR ALL USING (tenant_id = public.get_user_tenant_id());
+  FOR ALL USING (tenant_id = public.get_user_tenant_id())
+  WITH CHECK (tenant_id = public.get_user_tenant_id());
 
 -- HOUSEKEEPING REQUESTS: all members can manage
 CREATE POLICY "Members can manage housekeeping requests" ON housekeeping_requests
-  FOR ALL USING (tenant_id = public.get_user_tenant_id());
+  FOR ALL USING (tenant_id = public.get_user_tenant_id())
+  WITH CHECK (tenant_id = public.get_user_tenant_id());
 
 -- ============================================================
 -- INDEXES

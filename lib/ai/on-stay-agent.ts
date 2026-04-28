@@ -1,6 +1,7 @@
 import { generateText, stepCountIs, type ModelMessage } from "ai";
 
 import { aiProvider, AI_MODEL } from "@/lib/ai/provider";
+import { extractFallbackReplyFromToolResults } from "@/lib/ai/fallback-reply";
 import { createOnStayTools } from "@/lib/ai/tools";
 import type { LifecycleLanguage } from "@/lib/ai/lifecycle-session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -23,6 +24,20 @@ function isLifecycleAiDebugEnabled() {
   );
 }
 
+function getUsageSnapshot(result: {
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
+}) {
+  return {
+    inputTokens: result.usage?.inputTokens ?? null,
+    outputTokens: result.usage?.outputTokens ?? null,
+    totalTokens: result.usage?.totalTokens ?? null,
+  };
+}
+
 function buildOnStaySystemPrompt(input: {
   guestName: string;
   hotelName: string;
@@ -31,23 +46,35 @@ function buildOnStaySystemPrompt(input: {
 }) {
   if (input.preferredLanguage === "en") {
     return `You are the in-stay guest service AI for hotel "${input.hotelName}" assisting guest "${input.guestName}" in room ${input.roomNumber}.
-Your focus is operational support during stay.
+Focus: operational help during the stay.
+Routing:
+- food/drink -> order_in_room_dining
+- cleaning/turndown/trash/spills -> request_housekeeping(cleaning)
+- extra physical items (towel, pillow, blanket, toiletries, hair dryer, iron, robe, slippers, charger, adapter, water, hanger, extra bed, rollaway bed, baby cot, extra mattress) -> request_housekeeping(extra_items)
+- maintenance issues (AC, leak, TV, light, wifi, lock, hot water, door/window/curtain) -> request_housekeeping(maintenance)
+- other staff-follow-up housekeeping needs -> request_housekeeping(other)
+- sensitive/policy/unclear requests -> escalate_to_human
 Rules:
-- Be concise and action-oriented.
-- Use order_in_room_dining for food requests.
-- Use request_housekeeping for cleaning, extra item, and maintenance requests.
-- If request is unclear, risky, or outside policy, call escalate_to_human.
-- Always confirm what was submitted after tool execution.`;
+- For any actionable request, call a tool. Do not refuse on your own.
+- If unsure, escalate_to_human instead of refusing.
+- After a successful tool call, always reply in 1-2 short sentences confirming what was submitted and the next expectation.
+- Keep replies concise, warm, and action-oriented.`;
   }
 
   return `Anda adalah AI layanan tamu saat menginap untuk hotel "${input.hotelName}" yang membantu tamu "${input.guestName}" di kamar ${input.roomNumber}.
-Fokus Anda adalah kebutuhan operasional selama tamu menginap.
+Fokus: kebutuhan operasional selama tamu menginap.
+Pemetaan tool:
+- makanan/minuman -> order_in_room_dining
+- bersih-bersih/turndown/ambil sampah/tumpahan -> request_housekeeping(cleaning)
+- barang tambahan (handuk, bantal, selimut, sprei, sabun, hair dryer, setrika, sandal, robe, charger, adaptor, air mineral, gantungan, extra bed, rollaway bed, baby cot, kasur tambahan) -> request_housekeeping(extra_items)
+- maintenance (AC, bocor, TV, lampu, wifi, kunci, air panas, pintu/jendela/tirai) -> request_housekeeping(maintenance)
+- kebutuhan housekeeping lain yang perlu follow-up staf -> request_housekeeping(other)
+- isu sensitif/kebijakan/permintaan tidak jelas -> escalate_to_human
 Aturan:
-- Jawaban singkat dan langsung ke aksi.
-- Gunakan order_in_room_dining untuk permintaan makanan/minuman.
-- Gunakan request_housekeeping untuk cleaning, extra item, atau maintenance.
-- Jika permintaan tidak jelas, berisiko, atau di luar kebijakan, gunakan escalate_to_human.
-- Setelah tool berhasil, selalu konfirmasi apa yang sudah diajukan.`;
+- Untuk setiap permintaan yang bisa ditindak, panggil tool. Jangan menolak atas inisiatif sendiri.
+- Jika ragu, panggil escalate_to_human, bukan menolak.
+- Setelah tool berhasil, selalu balas 1-2 kalimat singkat yang mengonfirmasi permintaan dan ekspektasi berikutnya.
+- Jawaban singkat, ramah, dan langsung ke aksi.`;
 }
 
 export async function processOnStayConversation(
@@ -55,6 +82,7 @@ export async function processOnStayConversation(
 ) {
   const supabase = createAdminClient();
   const lifecycleDebugEnabled = isLifecycleAiDebugEnabled();
+  const inputMessageCount = params.messageHistory.length;
 
   const result = await generateText({
     model: aiProvider(AI_MODEL),
@@ -100,13 +128,28 @@ export async function processOnStayConversation(
     console.info("[Lifecycle AI][On-stay] Summary", {
       reservationId: params.reservationId,
       model: AI_MODEL,
+      inputMessageCount,
       steps: result.steps?.length ?? 0,
       toolCalls: allToolCalls.length,
       toolErrors,
+      usage: getUsageSnapshot(result),
+    });
+  }
+
+  const response = extractFallbackReplyFromToolResults(
+    result,
+    params.preferredLanguage,
+  );
+
+  if (lifecycleDebugEnabled && (!result.text || !result.text.trim())) {
+    console.warn("[Lifecycle AI][On-stay] Empty model text, using fallback", {
+      reservationId: params.reservationId,
+      model: AI_MODEL,
+      fallbackUsed: response.length > 0,
     });
   }
 
   return {
-    response: result.text,
+    response,
   };
 }

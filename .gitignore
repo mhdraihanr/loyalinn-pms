@@ -42,3 +42,6 @@ next-env.d.ts
 
 # git worktrees
 .worktrees/
+
+# local agent artifacts
+.codex

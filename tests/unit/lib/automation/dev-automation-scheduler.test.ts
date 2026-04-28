@@ -9,6 +9,7 @@ describe("startDevelopmentAutomationScheduler", () => {
   const defaultIntervalMs = 10_000;
   const originalDevAutomationIntervalMs =
     process.env.DEV_AUTOMATION_SYNC_INTERVAL_MS;
+  const originalDevAutomationEnabled = process.env.DEV_AUTOMATION_SYNC_ENABLED;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -23,6 +24,11 @@ describe("startDevelopmentAutomationScheduler", () => {
         originalDevAutomationIntervalMs;
     } else {
       delete process.env.DEV_AUTOMATION_SYNC_INTERVAL_MS;
+    }
+    if (originalDevAutomationEnabled) {
+      process.env.DEV_AUTOMATION_SYNC_ENABLED = originalDevAutomationEnabled;
+    } else {
+      delete process.env.DEV_AUTOMATION_SYNC_ENABLED;
     }
     vi.useRealTimers();
   });
@@ -173,5 +179,41 @@ describe("startDevelopmentAutomationScheduler", () => {
     });
 
     expect(result.intervalMs).toBe(5000);
+  });
+
+  it("stays disabled when DEV_AUTOMATION_SYNC_ENABLED is false", async () => {
+    process.env.DEV_AUTOMATION_SYNC_ENABLED = "false";
+    const runWorker = vi.fn().mockResolvedValue(undefined);
+
+    const result = startDevelopmentAutomationScheduler({
+      runWorker,
+      environment: {
+        nodeEnv: "development",
+        nextRuntime: "nodejs",
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(defaultIntervalMs);
+
+    expect(result.started).toBe(false);
+    expect(runWorker).not.toHaveBeenCalled();
+  });
+
+  it("stays disabled when DEV_AUTOMATION_SYNC_INTERVAL_MS is false", async () => {
+    process.env.DEV_AUTOMATION_SYNC_INTERVAL_MS = "false";
+    const runWorker = vi.fn().mockResolvedValue(undefined);
+
+    const result = startDevelopmentAutomationScheduler({
+      runWorker,
+      environment: {
+        nodeEnv: "development",
+        nextRuntime: "nodejs",
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(defaultIntervalMs);
+
+    expect(result.started).toBe(false);
+    expect(runWorker).not.toHaveBeenCalled();
   });
 });

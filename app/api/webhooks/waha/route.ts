@@ -4,6 +4,10 @@ import { NextRequest, NextResponse } from "next/server";
 import type { ModelMessage } from "ai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generatePostStayCompletionHandoffReply } from "@/lib/ai/agent";
+import {
+  buildBudgetedMessageHistory,
+  buildTrimmedConversationSummary,
+} from "@/lib/ai/context-budget";
 import { processLifecycleGuestMessage } from "@/lib/ai/lifecycle-agent";
 import {
   type LifecycleLanguage,
@@ -39,6 +43,7 @@ const POST_STAY_ELIGIBLE_FEEDBACK_STATUSES = new Set([
 
 const COMPLETED_POST_STAY_HANDOFF_ACTION =
   "completed_post_stay_handoff_notified";
+const MAX_LIFECYCLE_RECENT_MESSAGES = 8;
 
 const RESERVATION_STATUS_LOOKUP_ORDER = [
   "on-stay",
@@ -965,10 +970,34 @@ export async function POST(req: NextRequest) {
     );
 
     // Konversi logs dari database ke format CoreMessage AI SDK
-    const messageHistory: ModelMessage[] = (rawLogs || []).map((log) => ({
+    const fullMessageHistory: ModelMessage[] = (rawLogs || []).map((log) => ({
       role: log.direction === "inbound" ? "user" : "assistant",
       content: String(log.content ?? ""),
     }));
+    const trimmedMessages =
+      fullMessageHistory.length > MAX_LIFECYCLE_RECENT_MESSAGES
+        ? fullMessageHistory.slice(0, -MAX_LIFECYCLE_RECENT_MESSAGES)
+        : [];
+    const historySummary = buildTrimmedConversationSummary({
+      messages: trimmedMessages,
+      language: preferredLanguage,
+    });
+    const messageHistory = buildBudgetedMessageHistory({
+      messages: fullMessageHistory,
+      maxRecentMessages: MAX_LIFECYCLE_RECENT_MESSAGES,
+      trimmedSummary: historySummary,
+    });
+
+    if (lifecycleDebugEnabled && trimmedMessages.length > 0) {
+      console.info("[WAHA][Lifecycle AI] History budget applied", {
+        tenantId: reservation.tenant_id,
+        reservationId: reservation.id,
+        lifecycleStage,
+        fullMessageCount: fullMessageHistory.length,
+        trimmedMessageCount: trimmedMessages.length,
+        sentMessageCount: messageHistory.length,
+      });
+    }
 
     const isCompletedPostStayConversation =
       lifecycleStage === "post-stay" &&
