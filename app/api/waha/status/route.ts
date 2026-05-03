@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { wahaClient } from "@/lib/waha/client";
 import { getCurrentUserTenant } from "@/lib/auth/tenant";
 
+type WahaSessionInfo = {
+  name: string;
+  status: string;
+  me?: unknown;
+};
+
 export async function GET() {
   const userTenant = await getCurrentUserTenant();
   if (!userTenant)
@@ -11,8 +17,8 @@ export async function GET() {
   // In a multi-tenant paid setup, this would be userTenant.tenantId
   const sessionId = "default";
   try {
-    const sessions = await wahaClient.getSessions();
-    const session = sessions.find((s: any) => s.name === sessionId);
+    const sessions = (await wahaClient.getSessions()) as WahaSessionInfo[];
+    const session = sessions.find((s) => s.name === sessionId);
 
     if (!session) {
       return NextResponse.json({ status: "STOPPED" });
@@ -22,8 +28,9 @@ export async function GET() {
       status: session.status,
       me: session.me, // connected phone info
     });
-  } catch (error: any) {
-    console.error("WAHA API Error:", error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("WAHA API Error:", message);
     return NextResponse.json(
       { error: "WAHA connection failed", status: "ERROR" },
       { status: 500 },

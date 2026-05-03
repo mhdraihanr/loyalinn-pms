@@ -488,6 +488,7 @@ Files:
 Features:
 
 - Data fetching extracted to `lib/data/reservations.ts` for consistency
+- Compact summary cards above the table: overview, pre-arrival, on-stay, checked-out
 - Mantine UI components: `<Tabs>` for statuses (all, pre-arrival, on-stay, checked-out) and `<Table>` for data display
 - Columns: guest, room, dates, status (`<Badge>`), amount, source
 
@@ -659,6 +660,7 @@ Current Status (2026-04-16):
 - ✅ Task 4.5 baseline is implemented: lifecycle routing now covers `pre-arrival`, `on-stay`, and `post-stay` in WAHA webhook flow with phase-specific agent entrypoints.
 - ✅ Lifecycle session persistence is implemented via `lifecycle_ai_sessions` (tracking stage, handoff state, and last action metadata).
 - ✅ Operations dashboard for AI-generated housekeeping, room-service, and arrival requests is implemented.
+- ✅ Operations dashboard UI is refreshed with summary cards, auto-refresh, and valid Tabler icon exports for queue tabs.
 - ✅ Pre-arrival ETA capture and early check-in requests now create first-class `arrival_requests` rows for front office triage while preserving lifecycle session tracking.
 
 Implemented files tracked for Phase 4 to date (Tasks 1-8):

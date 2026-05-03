@@ -11,8 +11,9 @@ export async function GET() {
     // WAHA Core free version only supports 1 session, typically named "default"
     const result = await wahaClient.getQR("default");
     return NextResponse.json(result);
-  } catch (error: any) {
-    console.error("WAHA Get QR Error:", error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("WAHA Get QR Error:", message);
     return NextResponse.json(
       { error: "Failed to get WAHA QR code" },
       { status: 500 },

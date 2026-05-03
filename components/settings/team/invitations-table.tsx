@@ -29,10 +29,12 @@ export function InvitationsTable({
         color: "green",
       });
       // In a real app we'd refresh the list, but for UX let's just assume it succeeded.
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Failed to resend.";
       notifications.show({
         title: "Error",
-        message: error.message || "Failed to resend.",
+        message,
         color: "red",
       });
     } finally {
@@ -50,10 +52,12 @@ export function InvitationsTable({
         message: "Invitation revoked.",
         color: "green",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Failed to revoke.";
       notifications.show({
         title: "Error",
-        message: error.message || "Failed to revoke.",
+        message,
         color: "red",
       });
     } finally {

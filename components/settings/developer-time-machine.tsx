@@ -9,7 +9,6 @@ import {
   IconClockHour4,
 } from "@tabler/icons-react";
 import { DateTimePicker } from "@mantine/dates";
-// @ts-ignore: Mantine CSS module types mapping issue
 import "@mantine/dates/styles.css";
 
 export function DeveloperTimeMachine() {

@@ -42,11 +42,20 @@ export async function upsertLifecycleAiSession(
     guest_id: params.guestId,
     lifecycle_stage: params.stage,
     session_status: params.sessionStatus ?? "active",
-    needs_human_follow_up: params.needsHumanFollowUp ?? false,
-    last_action_type: params.lastActionType ?? null,
-    last_action_payload: params.lastActionPayload ?? {},
     updated_at: now,
   };
+
+  if ("needsHumanFollowUp" in params) {
+    payload.needs_human_follow_up = params.needsHumanFollowUp ?? false;
+  }
+
+  if ("lastActionType" in params) {
+    payload.last_action_type = params.lastActionType ?? null;
+  }
+
+  if ("lastActionPayload" in params) {
+    payload.last_action_payload = params.lastActionPayload ?? {};
+  }
 
   if (params.touchInboundAt) {
     payload.last_inbound_message_at = now;

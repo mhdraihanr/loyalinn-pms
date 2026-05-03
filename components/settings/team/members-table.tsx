@@ -37,10 +37,12 @@ export function MembersTable({
         message: "Member removed.",
         color: "green",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Failed to remove.";
       notifications.show({
         title: "Error",
-        message: error.message || "Failed to remove.",
+        message,
         color: "red",
       });
     } finally {

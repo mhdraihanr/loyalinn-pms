@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { POST } from "@/app/api/webhooks/pms/route";
@@ -26,7 +27,6 @@ vi.mock("@/lib/supabase/admin", () => ({
 
 function buildSignedRequest(body: string, secret = "test-secret") {
   const timestamp = String(Math.floor(Date.now() / 1000));
-  const { createHmac } = require("node:crypto") as typeof import("node:crypto");
   const signature = createHmac("sha256", secret)
     .update(`${timestamp}.${body}`)
     .digest("hex");

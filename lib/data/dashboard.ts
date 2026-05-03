@@ -1,5 +1,16 @@
 import { createClient } from "@/lib/supabase/server";
 
+type RecentReservationRow = {
+  id: string;
+  room_number: string | null;
+  check_in_date: string | null;
+  check_out_date: string | null;
+  status: string;
+  guests: {
+    name: string | null;
+  } | null;
+};
+
 export async function getDashboardStats(tenantId: string) {
   const supabase = await createClient();
 
@@ -55,11 +66,12 @@ export async function getRecentReservations(tenantId: string) {
     console.error("Error fetching recent reservations:", error);
   }
 
-  // Flatten the response so it matches what the frontend expects
-  const formattedData = (data || []).map((r: any) => ({
-    ...r,
-    guest_name: r.guests?.name || "Unknown Guest",
-  }));
+  const formattedData = ((data as RecentReservationRow[] | null) || []).map(
+    (r) => ({
+      ...r,
+      guest_name: r.guests?.name || "Unknown Guest",
+    }),
+  );
 
   return formattedData;
 }

@@ -1,67 +1,94 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, Text, Button, Badge, Group, Stack, Alert } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconBrandWhatsapp, IconAlertCircle } from "@tabler/icons-react";
 import { WahaQrModal } from "@/components/settings/waha/waha-qr-modal";
 
+type WahaPhoneInfo = {
+  user?: string;
+  id?: string;
+};
+
+type WahaStatusResponse = {
+  status?: string;
+  me?: WahaPhoneInfo | null;
+};
+
+type WahaQrResponse = {
+  qr?: string;
+  image?: string;
+  mimetype?: string;
+  data?: string;
+};
+
 export default function WahaSettingsPage() {
   const [status, setStatus] = useState<string>("LOADING");
-  const [phoneInfo, setPhoneInfo] = useState<any>(null);
+  const [phoneInfo, setPhoneInfo] = useState<WahaPhoneInfo | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
 
-  const fetchStatus = async () => {
+  const fetchQrCode = useCallback(async () => {
+    try {
+      const res = await fetch("/api/waha/qr");
+      const data = (await res.json()) as WahaQrResponse | string;
+
+      if (data && typeof data === "object" && "qr" in data && data.qr) {
+        setQrCode(data.qr);
+      } else if (
+        data &&
+        typeof data === "object" &&
+        "image" in data &&
+        data.image
+      ) {
+        setQrCode(data.image);
+      } else if (
+        data &&
+        typeof data === "object" &&
+        "mimetype" in data &&
+        "data" in data &&
+        data.mimetype &&
+        data.data
+      ) {
+        setQrCode(`data:${data.mimetype};base64,${data.data}`);
+      } else if (typeof data === "string" && data.startsWith("<svg")) {
+        setQrCode(`data:image/svg+xml;utf8,${encodeURIComponent(data)}`);
+      } else {
+        setQrCode(null);
+      }
+    } catch {
+      console.error("Failed to load QR code");
+    }
+  }, []);
+
+  const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/waha/status");
-      if (!res.ok) throw new Error("Failed to fetch API status");
+      const data = (await res.json()) as WahaStatusResponse;
 
-      const data = await res.json();
       setStatus(data.status || "STOPPED");
       setPhoneInfo(data.me || null);
 
       if (data.status === "SCAN_QR_CODE" && !qrCode) {
         setIsModalOpen(true);
-        fetchQrCode();
+        void fetchQrCode();
       } else if (data.status === "WORKING") {
         setIsModalOpen(false);
       }
-    } catch (error) {
+    } catch {
       setStatus("ERROR");
     }
-  };
-
-  const fetchQrCode = async () => {
-    try {
-      const res = await fetch("/api/waha/qr");
-      const data = await res.json();
-
-      // Depending on WAHA API, might need to parse. Assuming base64 data URI or raw image.
-      if (data && data.qr) {
-        setQrCode(data.qr);
-      } else if (data && data.image) {
-        setQrCode(data.image);
-      } else if (data && data.mimetype && data.data) {
-        setQrCode(`data:${data.mimetype};base64,${data.data}`);
-      } else if (typeof data === "string" && data.startsWith("<svg")) {
-        setQrCode(`data:image/svg+xml;utf8,${encodeURIComponent(data)}`);
-      } else {
-        // fallback to standard base64 if returned generically
-        setQrCode(null);
-      }
-    } catch (error) {
-      console.error("Failed to load QR code", error);
-    }
-  };
+  }, [fetchQrCode, qrCode]);
 
   useEffect(() => {
-    fetchStatus();
-    // Poll every 3 seconds
-    const interval = setInterval(fetchStatus, 3000);
+    void fetchStatus();
+    const interval = setInterval(() => {
+      void fetchStatus();
+    }, 3000);
     return () => clearInterval(interval);
-  }, [qrCode]);
+  }, [fetchStatus]);
 
   const handleConnect = async () => {
     setIsActionLoading(true);
@@ -74,7 +101,7 @@ export default function WahaSettingsPage() {
         message: "Starting WhatsApp session...",
         color: "blue",
       });
-    } catch (error) {
+    } catch {
       notifications.show({
         title: "Error",
         message: "Failed to start session.",
@@ -99,7 +126,7 @@ export default function WahaSettingsPage() {
       setStatus("STOPPED");
       setPhoneInfo(null);
       setQrCode(null);
-    } catch (error) {
+    } catch {
       notifications.show({
         title: "Error",
         message: "Failed to disconnect session.",

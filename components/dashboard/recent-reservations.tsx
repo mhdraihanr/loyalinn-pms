@@ -2,6 +2,15 @@
 
 import { Table, Text, Badge, Box } from "@mantine/core";
 
+type RecentReservationRow = {
+  id: string;
+  guest_name: string | null;
+  room_number: string | null;
+  check_in_date: string | null;
+  check_out_date: string | null;
+  status: string;
+};
+
 const statusColors: Record<string, string> = {
   "pre-arrival": "blue",
   "on-stay": "green",
@@ -12,7 +21,7 @@ const statusColors: Record<string, string> = {
 export function RecentReservationsTable({
   reservations,
 }: {
-  reservations: any[];
+  reservations: RecentReservationRow[];
 }) {
   if (reservations.length === 0) {
     return (

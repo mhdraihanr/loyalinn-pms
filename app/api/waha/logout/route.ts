@@ -11,8 +11,9 @@ export async function POST() {
     // WAHA Core free version only supports 1 session, typically named "default"
     const result = await wahaClient.logoutSession("default");
     return NextResponse.json(result);
-  } catch (error: any) {
-    console.error("WAHA Logout Session Error:", error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("WAHA Logout Session Error:", message);
     return NextResponse.json(
       { error: "Failed to logout WAHA session" },
       { status: 500 },
