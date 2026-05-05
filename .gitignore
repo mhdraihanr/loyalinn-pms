@@ -45,3 +45,12 @@ next-env.d.ts
 
 # local agent artifacts
 .codex
+/docs/
+/conference-paper/
+/tests/
+/testapi/
+/.agents/
+/.kilocode/
+/.codex/
+/check_templates.mjs
+/debug_onstay.mjs
