@@ -142,11 +142,6 @@ a-proposal2/
 │   ├── migrations/                 # Versioned database migrations
 │   ├── schema.sql                  # Current schema snapshot
 │   └── seed.sql                    # Seed data
-├── tests/
-│   ├── integration/                # Route and workflow integration tests
-│   └── unit/                       # Pure helper and agent tests
-├── docs/                           # Phase docs, runbooks, designs, and implementation notes
-├── conference-paper/               # Research paper and demo artifacts
 └── package.json
 ```
 
@@ -196,7 +191,7 @@ Create `.env.local` in the project root and fill in the required Supabase, WAHA,
 
 ### 3. Apply database schema
 
-Apply migrations from `supabase/migrations/` using the project Supabase workflow. See `docs/migrations.md` for migration strategy and rollback expectations.
+Apply the SQL files in `supabase/migrations/` to the target Supabase project using your preferred Supabase migration workflow.
 
 ### 4. Start the development server
 
@@ -260,29 +255,6 @@ Important database practices:
 
 ---
 
-## Documentation Index
-
-| Document                                                          | Purpose                                                 |
-| ----------------------------------------------------------------- | ------------------------------------------------------- |
-| `docs/plan.md`                                                    | Execution-ready roadmap across all phases               |
-| `docs/README.md`                                                  | Documentation directory map and contribution standards  |
-| `docs/migrations.md`                                              | Database migration strategy                             |
-| `docs/runbook.md`                                                 | Operational procedures and incident response notes      |
-| `docs/phase-0/README.md`                                          | Foundation status and implementation record             |
-| `docs/phase-1/README.md`                                          | Core UI, dashboard, auth, and onboarding notes          |
-| `docs/phase-2/README.md`                                          | PMS integration MVP summary                             |
-| `docs/phase-2/qloapps-adapter-guide.md`                           | QloApps setup and adapter guide                         |
-| `docs/phase-3/README.md`                                          | WAHA integration, templates, and team management plan   |
-| `docs/phase-4/2026-03-07-phase-4-automation-engine.md`            | Automation engine implementation plan and progress      |
-| `docs/phase-4/2026-04-12-ai-settings-implementation.md`           | Tenant AI settings implementation and verification      |
-| `docs/phase-4/2026-04-21-lifecycle-ai-observability-hardening.md` | Lifecycle AI observability and webhook dedupe hardening |
-| `docs/phase-4/2026-04-22-operations-dashboard.md`                 | Operations dashboard implementation details             |
-| `docs/phase-4/2026-04-28-arrival-requests-operations.md`          | Arrival Requests operations update                      |
-| `docs/plans/`                                                     | Archived designs and implementation plans               |
-| `conference-paper/`                                               | Research paper, metrics, demo guidance, and diagrams    |
-
----
-
 ## Current Project Status
 
 | Phase   | Status            | Summary                                                                                         |
@@ -297,7 +269,6 @@ Important database practices:
 
 ## Operational Notes
 
-- Use `docs/runbook.md` for production troubleshooting.
 - Enable `LIFECYCLE_AI_DEBUG=true` only during focused AI routing or tool-calling triage.
 - WAHA webhook duplication can happen when both global and session webhooks are configured with overlapping events; current guardrails normalize events and skip redundant registration when a global webhook is already present.
 - The Operations dashboard shows active AI-generated operational rows; completed, resolved, or cancelled rows remain in the database for audit/history.
