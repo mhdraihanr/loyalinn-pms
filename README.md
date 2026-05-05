@@ -254,18 +254,6 @@ Important database practices:
 
 ---
 
-## Current Project Status
-
-| Phase   | Status            | Summary                                                                                         |
-| ------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| Phase 0 | Completed         | Foundations, schema baseline, migration strategy, observability baseline                        |
-| Phase 1 | Completed         | Core UI, auth, tenant onboarding, staff invite flow, dashboard shell                            |
-| Phase 2 | Completed         | PMS settings, reservation UI, adapter contract, sync service, cron sync                         |
-| Phase 3 | Completed         | WAHA client, session controls, QR flow, multilingual templates, team management                 |
-| Phase 4 | Active / advanced | Automation jobs, feedback workflow, lifecycle AI, operations dashboard, observability hardening |
-
----
-
 ## Operational Notes
 
 - Enable `LIFECYCLE_AI_DEBUG=true` only during focused AI routing or tool-calling triage.
