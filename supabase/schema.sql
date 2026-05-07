@@ -161,7 +161,7 @@ CREATE TABLE arrival_requests (
   eta TEXT,
   requested_time TEXT,
   details JSONB NOT NULL DEFAULT '{}'::jsonb,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in-progress', 'completed', 'cancelled')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in-progress', 'resolved', 'cancelled')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -266,7 +266,7 @@ CREATE TABLE inbound_events (
   payload JSONB NOT NULL,
   payload_hash TEXT NOT NULL,
   processed BOOLEAN DEFAULT false,
-  received_at TIMESTAMPTZ DEFAULT NOW(),
+  received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   processed_at TIMESTAMPTZ,
   processing_error TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),

@@ -12,11 +12,12 @@ export async function getHousekeepingRequests(tenantId: string) {
       details,
       status,
       created_at,
+      updated_at,
       reservation_id,
       guests ( name )
     `)
     .eq("tenant_id", tenantId)
-    .in("status", ["pending", "in-progress"])
+    .or(`status.in.(pending,in-progress),and(status.eq.completed,updated_at.gte.${new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()})`)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -39,11 +40,12 @@ export async function getRoomServiceOrders(tenantId: string) {
       total_amount,
       status,
       created_at,
+      updated_at,
       reservation_id,
       guests ( name )
     `)
     .eq("tenant_id", tenantId)
-    .in("status", ["pending", "in-progress"])
+    .or(`status.in.(pending,in-progress),and(status.eq.completed,updated_at.gte.${new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()})`)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -68,12 +70,13 @@ export async function getArrivalRequests(tenantId: string) {
       details,
       status,
       created_at,
+      updated_at,
       reservation_id,
       guests ( name ),
       reservations ( check_in_date )
     `)
     .eq("tenant_id", tenantId)
-    .in("status", ["pending", "in-progress"])
+    .or(`status.in.(pending,in-progress),and(status.eq.resolved,updated_at.gte.${new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()})`)
     .order("created_at", { ascending: false });
 
   if (error) {

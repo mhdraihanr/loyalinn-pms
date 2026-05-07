@@ -11,6 +11,8 @@ export type PmsConfig = {
   is_active: boolean;
 };
 
+const ALLOWED_PMS_TYPES = ["qloapps", "custom"] as const;
+
 export async function getPmsConfig(): Promise<PmsConfig | null> {
   const tenantUser = await getCurrentUserTenant();
   if (!tenantUser) return null;
@@ -42,7 +44,9 @@ export async function savePmsConfig(formData: FormData) {
     return { error: "All fields are required" };
   }
 
-  if (!["cloudbeds", "mews", "qloapps", "custom"].includes(pmsType)) {
+  if (
+    !ALLOWED_PMS_TYPES.includes(pmsType as (typeof ALLOWED_PMS_TYPES)[number])
+  ) {
     return { error: "Invalid PMS Type" };
   }
 

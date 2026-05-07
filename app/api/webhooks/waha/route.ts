@@ -3,6 +3,8 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import type { ModelMessage } from "ai";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { parseDirectPostStayFeedback } from "@/lib/automation/post-stay-feedback-parser";
+import { completePostStayFeedbackWithReward } from "@/lib/automation/feedback-reward";
 import { generatePostStayCompletionHandoffReply } from "@/lib/ai/agent";
 import {
   buildBudgetedMessageHistory,
@@ -43,6 +45,7 @@ const POST_STAY_ELIGIBLE_FEEDBACK_STATUSES = new Set([
 
 const COMPLETED_POST_STAY_HANDOFF_ACTION =
   "completed_post_stay_handoff_notified";
+const DIRECT_POST_STAY_FEEDBACK_ACTION = "direct_post_stay_feedback_saved";
 const MAX_LIFECYCLE_RECENT_MESSAGES = 8;
 
 const RESERVATION_STATUS_LOOKUP_ORDER = [
@@ -801,6 +804,28 @@ function resolveAiProviderFailureReply(params: {
   return renderHandoffTemplate(template, { guestName, hotelName });
 }
 
+function resolveDirectPostStayFeedbackReply(params: {
+  guestName: string;
+  preferredLanguage: LifecycleLanguage;
+  pointsAwarded: number;
+}) {
+  const { guestName, preferredLanguage, pointsAwarded } = params;
+
+  if (preferredLanguage === "en") {
+    if (pointsAwarded > 0) {
+      return `Thank you ${guestName}, your feedback has been recorded. We have added ${pointsAwarded} reward points to your profile.`;
+    }
+
+    return `Thank you ${guestName}, your feedback has been recorded.`;
+  }
+
+  if (pointsAwarded > 0) {
+    return `Terima kasih ${guestName}, feedback Anda sudah kami catat. Kami juga sudah menambahkan ${pointsAwarded} poin reward ke profil Anda.`;
+  }
+
+  return `Terima kasih ${guestName}, feedback Anda sudah kami catat.`;
+}
+
 function isLifecycleAiDebugEnabled() {
   return (
     process.env.LIFECYCLE_AI_DEBUG === "true" ||
@@ -996,6 +1021,74 @@ export async function POST(req: NextRequest) {
         fullMessageCount: fullMessageHistory.length,
         trimmedMessageCount: trimmedMessages.length,
         sentMessageCount: messageHistory.length,
+      });
+    }
+
+    const directPostStayFeedback =
+      lifecycleStage === "post-stay" &&
+      (reservation.post_stay_feedback_status === "pending" ||
+        reservation.post_stay_feedback_status === "ai_followup")
+        ? parseDirectPostStayFeedback(body)
+        : null;
+
+    if (directPostStayFeedback) {
+      const rewardResult = await completePostStayFeedbackWithReward({
+        supabase,
+        reservationId: reservation.id,
+        tenantId: reservation.tenant_id,
+        rating: directPostStayFeedback.rating,
+        comments: directPostStayFeedback.comments,
+      });
+
+      const replyText = resolveDirectPostStayFeedbackReply({
+        guestName,
+        preferredLanguage,
+        pointsAwarded: rewardResult.pointsAwarded,
+      });
+
+      await wahaClient.sendMessage(session, chatId, replyText);
+      await supabase.from("message_logs").insert({
+        tenant_id: reservation.tenant_id,
+        reservation_id: reservation.id,
+        guest_id: reservation.guest_id,
+        phone,
+        content: replyText,
+        direction: "outbound",
+        status: "sent",
+        trigger_type: triggerType,
+      });
+
+      await upsertLifecycleAiSession(supabase, {
+        tenantId: reservation.tenant_id,
+        reservationId: reservation.id,
+        guestId: reservation.guest_id,
+        stage: lifecycleStage,
+        sessionStatus: "handoff",
+        needsHumanFollowUp: false,
+        lastActionType: DIRECT_POST_STAY_FEEDBACK_ACTION,
+        lastActionPayload: {
+          rating: directPostStayFeedback.rating,
+          pointsAwarded: rewardResult.pointsAwarded,
+          parser: "deterministic",
+        },
+        touchInboundAt: true,
+        touchOutboundAt: true,
+      });
+
+      if (lifecycleDebugEnabled) {
+        console.info("[WAHA][Lifecycle AI] Direct post-stay feedback saved", {
+          tenantId: reservation.tenant_id,
+          reservationId: reservation.id,
+          rating: directPostStayFeedback.rating,
+          pointsAwarded: rewardResult.pointsAwarded,
+        });
+      }
+
+      return NextResponse.json({
+        status: "success:direct-post-stay-feedback",
+        ai_reply: replyText,
+        rating: directPostStayFeedback.rating,
+        deterministic: true,
       });
     }
 

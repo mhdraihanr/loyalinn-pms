@@ -1,7 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Badge, Box, Button, Group, Stack, Table, Text } from "@mantine/core";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Badge,
+  Box,
+  Button,
+  Group,
+  Paper,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  ThemeIcon,
+} from "@mantine/core";
+import { IconDoorEnter, IconSearch } from "@tabler/icons-react";
 import { updateArrivalRequestStatus } from "@/lib/actions/operations";
 import { createClient } from "@/lib/supabase/client";
 
@@ -38,13 +50,38 @@ function getDetailText(request: ArrivalRequest) {
   return note ?? reason ?? "-";
 }
 
+function matchesArrivalRequest(request: ArrivalRequest, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (!normalizedQuery) return true;
+
+  return [
+    request.room_number,
+    request.status,
+    request.guests?.name,
+    requestLabels[request.request_type],
+    request.eta,
+    request.requested_time,
+    request.reservations?.check_in_date,
+    getDetailText(request),
+  ]
+    .filter(Boolean)
+    .some((value) => value!.toLowerCase().includes(normalizedQuery));
+}
+
 export function ArrivalRequestsTable({
   initialData,
 }: {
   initialData: ArrivalRequest[];
 }) {
   const [requests, setRequests] = useState<ArrivalRequest[]>(initialData);
+  const [query, setQuery] = useState("");
   const supabase = createClient();
+
+  const filteredRequests = useMemo(
+    () => requests.filter((request) => matchesArrivalRequest(request, query)),
+    [requests, query],
+  );
 
   useEffect(() => {
     const channel = supabase
@@ -97,12 +134,52 @@ export function ArrivalRequestsTable({
   if (requests.length === 0) {
     return (
       <Box py="xl" ta="center">
-        <Text c="dimmed">No pending arrival requests.</Text>
+        <Stack gap="sm" align="center">
+          <ThemeIcon size={48} radius="xl" variant="light" color="gray">
+            <IconDoorEnter size={24} />
+          </ThemeIcon>
+          <Text fw={600}>No arrival requests</Text>
+          <Text size="sm" c="dimmed" maw={420}>
+            Pre-arrival ETA and early check-in requests will appear here after
+            guests share arrival plans through WhatsApp.
+          </Text>
+        </Stack>
       </Box>
     );
   }
 
   return (
+    <Stack gap="md">
+      <Group justify="space-between" align="end">
+        <Stack gap={2}>
+          <Text fw={600}>Arrival request queue</Text>
+          <Text size="sm" c="dimmed">
+            Search arrival requests by guest, room, request type, status, or notes.
+          </Text>
+        </Stack>
+
+        <TextInput
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          placeholder="Search arrival requests"
+          leftSection={<IconSearch size={16} />}
+          w={{ base: "100%", sm: 280 }}
+        />
+      </Group>
+
+      {filteredRequests.length === 0 ? (
+        <Paper withBorder radius="md" p="xl">
+          <Stack gap="sm" align="center">
+            <ThemeIcon size={44} radius="xl" variant="light" color="blue">
+              <IconSearch size={20} />
+            </ThemeIcon>
+            <Text fw={600}>No arrival requests match your search</Text>
+            <Text size="sm" c="dimmed">
+              Try another guest name, room number, request type, status, or note.
+            </Text>
+          </Stack>
+        </Paper>
+      ) : (
     <Table highlightOnHover verticalSpacing="sm">
       <Table.Thead>
         <Table.Tr>
@@ -115,7 +192,7 @@ export function ArrivalRequestsTable({
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
-        {requests.map((request) => (
+        {filteredRequests.map((request) => (
           <Table.Tr key={request.id}>
             <Table.Td>
               <Text size="sm">
@@ -195,5 +272,7 @@ export function ArrivalRequestsTable({
         ))}
       </Table.Tbody>
     </Table>
+      )}
+    </Stack>
   );
 }
