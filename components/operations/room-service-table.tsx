@@ -1,7 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Table, Text, Badge, Box, Group, Button, Stack } from "@mantine/core";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Badge,
+  Box,
+  Button,
+  Group,
+  Paper,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  ThemeIcon,
+} from "@mantine/core";
+import { IconSearch, IconToolsKitchen2 } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
 import { updateRoomServiceStatus } from "@/lib/actions/operations";
 
@@ -28,13 +40,37 @@ const statusColors: Record<string, string> = {
   cancelled: "red",
 };
 
+function matchesRoomServiceOrder(order: RoomServiceOrder, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (!normalizedQuery) return true;
+
+  const itemValues = order.items?.flatMap((item) => [item.name, item.notes]) ?? [];
+
+  return [
+    order.room_number,
+    order.status,
+    order.guests?.name,
+    order.total_amount?.toString(),
+    ...itemValues,
+  ]
+    .filter(Boolean)
+    .some((value) => value!.toLowerCase().includes(normalizedQuery));
+}
+
 export function RoomServiceTable({
   initialData,
 }: {
   initialData: RoomServiceOrder[];
 }) {
   const [orders, setOrders] = useState<RoomServiceOrder[]>(initialData);
+  const [query, setQuery] = useState("");
   const supabase = createClient();
+
+  const filteredOrders = useMemo(
+    () => orders.filter((order) => matchesRoomServiceOrder(order, query)),
+    [orders, query],
+  );
 
   useEffect(() => {
     const channel = supabase
@@ -80,12 +116,52 @@ export function RoomServiceTable({
   if (orders.length === 0) {
     return (
       <Box py="xl" ta="center">
-        <Text c="dimmed">No pending room service orders.</Text>
+        <Stack gap="sm" align="center">
+          <ThemeIcon size={48} radius="xl" variant="light" color="gray">
+            <IconToolsKitchen2 size={24} />
+          </ThemeIcon>
+          <Text fw={600}>No room service orders</Text>
+          <Text size="sm" c="dimmed" maw={420}>
+            AI-generated room service orders will appear here when guests place
+            in-room dining requests.
+          </Text>
+        </Stack>
       </Box>
     );
   }
 
   return (
+    <Stack gap="md">
+      <Group justify="space-between" align="end">
+        <Stack gap={2}>
+          <Text fw={600}>Room service queue</Text>
+          <Text size="sm" c="dimmed">
+            Search room service by guest, room, item, note, status, or amount.
+          </Text>
+        </Stack>
+
+        <TextInput
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          placeholder="Search room service"
+          leftSection={<IconSearch size={16} />}
+          w={{ base: "100%", sm: 280 }}
+        />
+      </Group>
+
+      {filteredOrders.length === 0 ? (
+        <Paper withBorder radius="md" p="xl">
+          <Stack gap="sm" align="center">
+            <ThemeIcon size={44} radius="xl" variant="light" color="blue">
+              <IconSearch size={20} />
+            </ThemeIcon>
+            <Text fw={600}>No room service orders match your search</Text>
+            <Text size="sm" c="dimmed">
+              Try another guest name, room number, item, note, or status term.
+            </Text>
+          </Stack>
+        </Paper>
+      ) : (
     <Table highlightOnHover verticalSpacing="sm">
       <Table.Thead>
         <Table.Tr>
@@ -97,7 +173,7 @@ export function RoomServiceTable({
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
-        {orders.map((order) => (
+        {filteredOrders.map((order) => (
           <Table.Tr key={order.id}>
             <Table.Td>
               <Text size="sm">{new Date(order.created_at).toLocaleTimeString()}</Text>
@@ -138,5 +214,7 @@ export function RoomServiceTable({
         ))}
       </Table.Tbody>
     </Table>
+      )}
+    </Stack>
   );
 }

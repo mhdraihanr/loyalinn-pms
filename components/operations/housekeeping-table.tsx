@@ -1,7 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Table, Text, Badge, Box, Group, Button, Stack } from "@mantine/core";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Badge,
+  Box,
+  Button,
+  Group,
+  Paper,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  ThemeIcon,
+} from "@mantine/core";
+import { IconBed, IconSearch } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
 import { updateHousekeepingStatus } from "@/lib/actions/operations";
 
@@ -40,13 +52,42 @@ function formatDetails(details: Record<string, unknown> | null): {
   return { description: description || "—", extraItems };
 }
 
+function matchesHousekeepingRequest(
+  request: HousekeepingRequest,
+  query: string,
+) {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (!normalizedQuery) return true;
+
+  const { description, extraItems } = formatDetails(request.details);
+
+  return [
+    request.room_number,
+    request.request_type,
+    request.status,
+    request.guests?.name,
+    description,
+    ...extraItems,
+  ]
+    .filter(Boolean)
+    .some((value) => value!.toLowerCase().includes(normalizedQuery));
+}
+
 export function HousekeepingTable({
   initialData,
 }: {
   initialData: HousekeepingRequest[];
 }) {
   const [requests, setRequests] = useState<HousekeepingRequest[]>(initialData);
+  const [query, setQuery] = useState("");
   const supabase = createClient();
+
+  const filteredRequests = useMemo(
+    () =>
+      requests.filter((request) => matchesHousekeepingRequest(request, query)),
+    [requests, query],
+  );
 
   useEffect(() => {
     const channel = supabase
@@ -92,12 +133,52 @@ export function HousekeepingTable({
   if (requests.length === 0) {
     return (
       <Box py="xl" ta="center">
-        <Text c="dimmed">No pending housekeeping requests.</Text>
+        <Stack gap="sm" align="center">
+          <ThemeIcon size={48} radius="xl" variant="light" color="gray">
+            <IconBed size={24} />
+          </ThemeIcon>
+          <Text fw={600}>No housekeeping requests</Text>
+          <Text size="sm" c="dimmed" maw={420}>
+            AI-generated housekeeping requests will appear here when guests ask
+            for room cleaning, amenities, or support.
+          </Text>
+        </Stack>
       </Box>
     );
   }
 
   return (
+    <Stack gap="md">
+      <Group justify="space-between" align="end">
+        <Stack gap={2}>
+          <Text fw={600}>Housekeeping queue</Text>
+          <Text size="sm" c="dimmed">
+            Search housekeeping by guest, room, type, status, or details.
+          </Text>
+        </Stack>
+
+        <TextInput
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          placeholder="Search housekeeping"
+          leftSection={<IconSearch size={16} />}
+          w={{ base: "100%", sm: 280 }}
+        />
+      </Group>
+
+      {filteredRequests.length === 0 ? (
+        <Paper withBorder radius="md" p="xl">
+          <Stack gap="sm" align="center">
+            <ThemeIcon size={44} radius="xl" variant="light" color="blue">
+              <IconSearch size={20} />
+            </ThemeIcon>
+            <Text fw={600}>No housekeeping requests match your search</Text>
+            <Text size="sm" c="dimmed">
+              Try another guest name, room number, type, status, or detail term.
+            </Text>
+          </Stack>
+        </Paper>
+      ) : (
     <Table highlightOnHover verticalSpacing="sm">
       <Table.Thead>
         <Table.Tr>
@@ -110,7 +191,7 @@ export function HousekeepingTable({
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
-        {requests.map((req) => (
+        {filteredRequests.map((req) => (
           <Table.Tr key={req.id}>
             <Table.Td>
               <Text size="sm">{new Date(req.created_at).toLocaleTimeString()}</Text>
@@ -164,5 +245,7 @@ export function HousekeepingTable({
         ))}
       </Table.Tbody>
     </Table>
+      )}
+    </Stack>
   );
 }

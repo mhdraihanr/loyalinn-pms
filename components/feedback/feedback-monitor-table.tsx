@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ActionIcon,
   Badge,
@@ -16,6 +16,7 @@ import {
   Stack,
   Table,
   Text,
+  TextInput,
   ThemeIcon,
   Tooltip,
 } from "@mantine/core";
@@ -26,6 +27,7 @@ import {
   IconExternalLink,
   IconGift,
   IconMessageCircle,
+  IconSearch,
   IconStar,
 } from "@tabler/icons-react";
 
@@ -75,15 +77,42 @@ function statusLabel(status: FeedbackMonitorRow["feedbackStatus"]) {
   return status.replace("-", " ");
 }
 
+function matchesFeedbackRow(row: FeedbackMonitorRow, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (!normalizedQuery) return true;
+
+  return [
+    row.guestName,
+    row.guestPhone,
+    statusLabel(row.feedbackStatus),
+    row.rating?.toString(),
+    row.comments,
+    row.checkOutDate,
+    row.updatedAt,
+  ]
+    .filter(Boolean)
+    .some((value) => value!.toLowerCase().includes(normalizedQuery));
+}
+
 export function FeedbackMonitorTable({ rows }: { rows: FeedbackMonitorRow[] }) {
+  const [query, setQuery] = useState("");
   const [selectedRow, setSelectedRow] = useState<FeedbackMonitorRow | null>(
     null,
+  );
+
+  const filteredRows = useMemo(
+    () => rows.filter((row) => matchesFeedbackRow(row, query)),
+    [rows, query],
   );
 
   if (rows.length === 0) {
     return (
       <Box py="xl" ta="center">
         <Stack gap="xs" align="center">
+          <ThemeIcon size={48} radius="xl" variant="light" color="gray">
+            <IconMessageCircle size={24} />
+          </ThemeIcon>
           <Text c="dimmed" fw={500}>
             Belum ada data feedback.
           </Text>
@@ -98,6 +127,38 @@ export function FeedbackMonitorTable({ rows }: { rows: FeedbackMonitorRow[] }) {
 
   return (
     <>
+      <Stack gap="md">
+        <Group justify="space-between" align="end">
+          <Stack gap={2}>
+            <Text fw={600}>Feedback list</Text>
+            <Text size="sm" c="dimmed">
+              Search feedback by guest, phone, status, rating, comment, or date.
+            </Text>
+          </Stack>
+
+          <TextInput
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder="Search feedback"
+            leftSection={<IconSearch size={16} />}
+            w={{ base: "100%", sm: 280 }}
+          />
+        </Group>
+
+        {filteredRows.length === 0 ? (
+          <Paper withBorder radius="md" p="xl">
+            <Stack gap="sm" align="center">
+              <ThemeIcon size={44} radius="xl" variant="light" color="blue">
+                <IconSearch size={20} />
+              </ThemeIcon>
+              <Text fw={600}>No feedback rows match your search</Text>
+              <Text size="sm" c="dimmed">
+                Try another guest name, phone number, status, rating, comment,
+                or date term.
+              </Text>
+            </Stack>
+          </Paper>
+        ) : (
       <Table highlightOnHover verticalSpacing="sm">
         <Table.Thead>
           <Table.Tr>
@@ -111,7 +172,7 @@ export function FeedbackMonitorTable({ rows }: { rows: FeedbackMonitorRow[] }) {
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {rows.map((row) => (
+          {filteredRows.map((row) => (
             <Table.Tr key={row.id}>
               <Table.Td>
                 <Stack gap={0}>
@@ -174,6 +235,8 @@ export function FeedbackMonitorTable({ rows }: { rows: FeedbackMonitorRow[] }) {
           ))}
         </Table.Tbody>
       </Table>
+        )}
+      </Stack>
 
       <Modal
         opened={Boolean(selectedRow)}
