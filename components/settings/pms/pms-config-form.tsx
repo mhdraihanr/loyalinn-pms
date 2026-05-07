@@ -15,6 +15,11 @@ import {
 import { notifications } from "@mantine/notifications";
 import { savePmsConfig, PmsConfig } from "@/lib/pms/config";
 
+const AVAILABLE_PMS_OPTIONS = [
+  { value: "qloapps", label: "QloApps" },
+  { value: "custom", label: "Custom / Generic" },
+] as const;
+
 export function PmsConfigForm({
   initialData,
 }: {
@@ -24,7 +29,11 @@ export function PmsConfigForm({
   const [error, setError] = useState<string | null>(null);
 
   // Derive initial values securely client-side
-  const defaultPms = initialData?.pms_type ?? "cloudbeds";
+  const defaultPms = AVAILABLE_PMS_OPTIONS.some(
+    (option) => option.value === initialData?.pms_type,
+  )
+    ? initialData?.pms_type
+    : "qloapps";
   const defaultEndpoint = initialData?.endpoint ?? "";
   const defaultApiKey = initialData?.credentials?.api_key ?? "";
   const defaultActive = initialData?.is_active ?? true;
@@ -71,12 +80,7 @@ export function PmsConfigForm({
               label="Integration Provider"
               description="Select your Property Management System"
               placeholder="Pick a provider"
-              data={[
-                { value: "cloudbeds", label: "Cloudbeds" },
-                { value: "mews", label: "Mews" },
-                { value: "qloapps", label: "QloApps" },
-                { value: "custom", label: "Custom / Generic" },
-              ]}
+              data={AVAILABLE_PMS_OPTIONS}
               defaultValue={defaultPms}
               required
             />
@@ -85,7 +89,7 @@ export function PmsConfigForm({
               name="endpoint"
               label="API Endpoint URL"
               description="The base URL where reservations can be fetched"
-              placeholder="https://api.cloudbeds.com/api/v1.1"
+              placeholder="https://your-qloapps-domain.com/api"
               defaultValue={defaultEndpoint}
               required
             />

@@ -17,7 +17,13 @@ Build a Next.js web app that integrates with hotel PMS systems to sync reservati
 - Supabase (Postgres, Auth, Realtime)
 - WAHA (self-hosted WhatsApp HTTP API)
 - Tailwind CSS + shadcn/ui
-- Mantine Core (Note: Use standard components like `TableThead` over compound components like `Table.Thead` inside Next.js Server Components to prevent 'Element type is invalid' rendering errors).
+- Mantine Core
+
+### UI Runtime Guardrails
+
+- In Next.js App Router server components, do not pass `next/link` through Mantine `component` props such as `component={Link}` on `ActionIcon` or similar interactive components. Wrap the Mantine control with `Link` instead.
+- Prefer client wrappers for complex Mantine table rendering and validate compound subcomponents in the actual runtime path when debugging `Element type is invalid` errors.
+- If a dashboard render fails after UI enrichment, isolate ornamental sections first and simplify non-critical header/detail blocks before changing data logic.
 
 ---
 
@@ -178,6 +184,8 @@ Files:
 Features:
 
 - Stats cards: total guests, active reservations, messages sent, occupancy rate
+- Operational attention summary for housekeeping, room service, and arrival requests
+- WhatsApp health card focused on WAHA connection status and connected number
 - Recent reservations list
 
 ### Task 1.4: Guests management page ✅
@@ -504,7 +512,8 @@ Features:
 
 - Secure storage of API Keys / credentials in `pms_configurations`
 - Status indicator for connexion health
-- Select PMS Provider from supported list
+- PMS settings UI currently exposes only `qloapps` and `custom` as selectable providers
+- Legacy saved UI values such as `mews` or `cloudbeds` are treated as unsupported in the form and fall back to `qloapps` without a database migration
 
 ### Task 2.3: PMS adapter contract and Sync Service ✅
 
@@ -943,6 +952,7 @@ Features:
 - Queue tables follow the Reservations/Guests UI pattern: table header, helper text, client-side search input, full empty state, and no-result search state.
 
 **UI Consistency Update (2026-05-07):**
+
 - Housekeeping search covers guest, room, request type, status, description, and extra items.
 - Room service search covers guest, room, item, note, status, and amount.
 - Arrival request search covers guest, room, request type, status, ETA/requested time, check-in date, and notes.
@@ -950,6 +960,7 @@ Features:
 - See [docs/dashboard-table-search-consistency.md](docs/dashboard-table-search-consistency.md)
 
 **Retention Policy Update (2026-05-07):**
+
 - Requests with status `resolved` (arrival requests) atau `completed` (housekeeping/room service) akan tetap tampil di dashboard selama 2 hari setelah status berubah.
 - Setelah 2 hari, request tersebut otomatis tidak tampil lagi di dashboard aktif, tapi tetap tersimpan di database untuk audit/history.
 - Tidak ada label baru, status tetap sesuai aslinya.
@@ -1069,7 +1080,7 @@ Defer:
 
 ## Open Product Questions (Must clarify before implementation)
 
-1. Which PMS is first go-live target: Cloudbeds or Mews?
+1. Is `qloapps` the first go-live PMS, with `custom` retained as a generic/manual integration option in settings?
 2. Exact event mapping matrix from PMS statuses to internal statuses?
 3. Throughput target per tenant (messages per minute/day)?
 4. Consent policy and legal jurisdiction (GDPR, PDPA, local laws)?
