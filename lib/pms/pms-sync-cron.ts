@@ -79,3 +79,9 @@ export async function runPmsSyncCron(
 
   return result;
 }
+
+export async function runPmsReconciliation(
+  baseTime = new Date(),
+): Promise<PmsSyncCronResult> {
+  return runPmsSyncCron(baseTime);
+}

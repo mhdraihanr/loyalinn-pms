@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<module>
+  <name>loyalinnwebhooksync</name>
+  <displayName>LoyalInn Webhook Sync</displayName>
+  <version>0.1.0</version>
+  <description>Webhook-first bridge from QloApps to LoyalInn PMS app.</description>
+  <author>LoyalInn</author>
+  <tab>administration</tab>
+  <is_configurable>1</is_configurable>
+  <need_instance>1</need_instance>
+  <limited_countries></limited_countries>
+</module>

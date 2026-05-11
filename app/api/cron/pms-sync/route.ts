@@ -1,9 +1,18 @@
 import { NextResponse } from "next/server";
 
-import { runPmsSyncCron } from "@/lib/pms/pms-sync-cron";
+import { runPmsReconciliation } from "@/lib/pms/pms-sync-cron";
+
+export const dynamic = "force-dynamic";
+
+function isReconciliationEnabled() {
+  return (
+    process.env.PMS_RECONCILIATION_ENABLED?.trim().toLowerCase() === "true"
+  );
+}
 
 function isAuthorized(request: Request) {
-  const secret = process.env.CRON_SECRET;
+  const secret =
+    process.env.PMS_RECONCILIATION_CRON_SECRET || process.env.CRON_SECRET;
   const authorization = request.headers.get("authorization");
 
   return Boolean(secret) && authorization === `Bearer ${secret}`;
@@ -14,8 +23,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if (!isReconciliationEnabled()) {
+    return NextResponse.json({
+      skipped: true,
+      reason: "PMS reconciliation disabled",
+    });
+  }
+
   try {
-    const result = await runPmsSyncCron(new Date());
+    const result = await runPmsReconciliation(new Date());
 
     return NextResponse.json(result);
   } catch (error) {
