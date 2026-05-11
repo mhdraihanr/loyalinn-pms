@@ -1,4 +1,4 @@
-import { runPmsSyncCron } from "@/lib/pms/pms-sync-cron";
+import { runPmsReconciliation } from "@/lib/pms/pms-sync-cron";
 
 const DEFAULT_INTERVAL_MS = 10 * 1000;
 
@@ -63,10 +63,14 @@ function isExplicitlyDisabled(value: string | undefined) {
   return value?.trim().toLowerCase() === "false";
 }
 
+function isExplicitlyEnabled(value: string | undefined) {
+  return value?.trim().toLowerCase() === "true";
+}
+
 function shouldStartScheduler(environment?: SchedulerEnvironment) {
   const nodeEnv = environment?.nodeEnv ?? process.env.NODE_ENV;
   const nextRuntime = environment?.nextRuntime ?? process.env.NEXT_RUNTIME;
-  const enabled = environment?.enabled ?? process.env.DEV_PMS_SYNC_ENABLED;
+  const enabled = environment?.enabled ?? process.env.PMS_DEV_SYNC_ENABLED;
   const rawInterval =
     environment?.intervalMs ?? process.env.DEV_PMS_SYNC_INTERVAL_MS;
 
@@ -74,7 +78,11 @@ function shouldStartScheduler(environment?: SchedulerEnvironment) {
     return false;
   }
 
-  return nodeEnv === "development" && nextRuntime === "nodejs";
+  return (
+    nodeEnv === "development" &&
+    nextRuntime === "nodejs" &&
+    isExplicitlyEnabled(enabled)
+  );
 }
 
 async function executeSync(options: {
@@ -114,7 +122,7 @@ export function startDevelopmentPmsSyncScheduler(
     nextRuntime: options.environment?.nextRuntime ?? process.env.NEXT_RUNTIME,
     intervalMs:
       options.environment?.intervalMs ?? process.env.DEV_PMS_SYNC_INTERVAL_MS,
-    enabled: options.environment?.enabled ?? process.env.DEV_PMS_SYNC_ENABLED,
+    enabled: options.environment?.enabled ?? process.env.PMS_DEV_SYNC_ENABLED,
   };
   const intervalMs = resolveIntervalMs({
     intervalMs: options.intervalMs,
@@ -137,7 +145,7 @@ export function startDevelopmentPmsSyncScheduler(
     };
   }
 
-  const runSync = options.runSync ?? (() => runPmsSyncCron());
+  const runSync = options.runSync ?? (() => runPmsReconciliation());
 
   const state: DevelopmentPmsSyncSchedulerState = {
     intervalId: setInterval(() => {

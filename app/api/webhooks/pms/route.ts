@@ -2,12 +2,9 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import {
-  buildIdempotencyKey,
-  buildPayloadHash,
-} from "@/lib/automation/idempotency";
+import { buildPayloadHash } from "@/lib/automation/idempotency";
 import { normalizeQloAppsWebhook } from "@/lib/automation/qloapps-normalizer";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { processQloAppsWebhookEvent } from "@/lib/pms/qloapps-webhook-processor";
 
 const MAX_TIMESTAMP_DRIFT_SECONDS = 300;
 
@@ -69,68 +66,32 @@ export async function POST(request: Request) {
   }
 
   const payloadHash = buildPayloadHash(rawBody);
-  const normalizedEvent = normalizeQloAppsWebhook(
-    payload as Record<string, string>,
+
+  let normalizedEvent;
+  try {
+    normalizedEvent = normalizeQloAppsWebhook(
+      payload as Record<string, string>,
+      rawBody,
+      payloadHash,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid payload";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
+
+  const result = await processQloAppsWebhookEvent({
     rawBody,
+    payload: payload as Record<string, unknown>,
     payloadHash,
-  );
-  const idempotencyKey = buildIdempotencyKey({
-    bookingId: normalizedEvent.bookingId,
-    status: normalizedEvent.status,
-    updatedAt: normalizedEvent.updatedAt,
-    rawPayload: rawBody,
+    normalizedEvent,
   });
 
-  const adminClient = createAdminClient();
-  const { data: inboundEvent, error: inboundError } = await adminClient
-    .from("inbound_events")
-    .insert({
-      tenant_id: normalizedEvent.tenantId,
-      event_id: normalizedEvent.eventId,
-      idempotency_key: idempotencyKey,
-      event_type: normalizedEvent.eventType,
-      source: "qloapps",
-      signature_valid: true,
-      payload: payload as Record<string, unknown>,
-      payload_hash: payloadHash,
-    })
-    .select("id")
-    .single();
-
-  if (inboundError?.code === "23505") {
-    return NextResponse.json({ received: true, duplicate: true });
+  if (!result.ok) {
+    return NextResponse.json(
+      { error: result.error },
+      { status: result.status },
+    );
   }
 
-  if (inboundError) {
-    return NextResponse.json({ error: inboundError.message }, { status: 500 });
-  }
-  // Opsi A: Pre-arrival and post-stay are processed strictly by the scheduler cron.
-  // We only trigger real-time automation messages for immediate actions like early check-in (on-stay).
-  const realtimeTriggers = ["on-stay", "cancelled"];
-  if (!realtimeTriggers.includes(normalizedEvent.status)) {
-    return NextResponse.json({
-      received: true,
-      duplicate: false,
-      job_enqueued: false,
-    });
-  }
-  const { error: jobError } = await adminClient.from("automation_jobs").insert({
-    tenant_id: normalizedEvent.tenantId,
-    job_type: "status-trigger",
-    trigger_type: normalizedEvent.status,
-    status: "pending",
-    payload: {
-      inbound_event_id: inboundEvent?.id,
-      event_type: normalizedEvent.eventType,
-      booking_id: normalizedEvent.bookingId,
-      status: normalizedEvent.status,
-      updated_at: normalizedEvent.updatedAt ?? null,
-    },
-  });
-
-  if (jobError) {
-    return NextResponse.json({ error: jobError.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ received: true, duplicate: false });
+  return NextResponse.json(result);
 }

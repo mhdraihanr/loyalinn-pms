@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "package:qloapps-module": "node scripts/package-qloapps-module.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.64",

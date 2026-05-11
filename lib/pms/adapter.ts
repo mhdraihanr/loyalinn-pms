@@ -32,6 +32,11 @@ export interface PMSAdapter {
   ): Promise<AdapterReservation[]>;
 
   /**
+   * Pulls one reservation by PMS booking/order identifier when supported.
+   */
+  pullReservationById?(bookingId: string): Promise<AdapterReservation | null>;
+
+  /**
    * Pulls guest details for a specific guest ID
    */
   pullGuest(pmsGuestId: string): Promise<AdapterGuest | null>;

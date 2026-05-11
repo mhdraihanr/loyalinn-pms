@@ -135,6 +135,95 @@ export class QloAppsAdapter implements PMSAdapter {
     };
   }
 
+  private async buildReservationFromRoom(
+    room: QloAppsRoomBooking,
+  ): Promise<AdapterReservation | null> {
+    let amount = 0;
+    let source = "Unknown";
+    let isPaymentComplete = false;
+
+    try {
+      const orderRes = await fetch(
+        `${this.endpoint}/api/orders/${room.id_order}?output_format=JSON`,
+        { headers: this.headers },
+      );
+      if (orderRes.ok) {
+        const orderData = (await orderRes.json()) as QloAppsOrderResponse;
+        if (orderData && orderData.order) {
+          const parsedAmount = Number.parseFloat(
+            orderData.order.total_paid_tax_incl ?? "0",
+          );
+          amount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
+          source = orderData.order.module || "QloApps Web";
+
+          isPaymentComplete =
+            orderData.order.current_state === "2" ||
+            orderData.order.current_state === 2;
+        }
+      }
+    } catch (e) {
+      console.warn(
+        `Could not fetch order ${room.id_order} for room booking ${room.id}`,
+        e,
+      );
+    }
+
+    if (!isPaymentComplete) {
+      return null;
+    }
+
+    const checkInDate =
+      room.check_in && room.check_in !== "0000-00-00 00:00:00"
+        ? room.check_in.split(" ")[0]
+        : room.date_from.split(" ")[0];
+    const checkOutDate =
+      room.check_out && room.check_out !== "0000-00-00 00:00:00"
+        ? room.check_out.split(" ")[0]
+        : room.date_to.split(" ")[0];
+
+    return {
+      pms_reservation_id: String(room.id_order),
+      pms_guest_id: room.id_customer.toString(),
+      room_number: room.room_num,
+      check_in_date: checkInDate,
+      check_out_date: checkOutDate,
+      pms_status: room.id_status.toString(),
+      amount,
+      source,
+    };
+  }
+
+  async pullReservationById(
+    bookingId: string,
+  ): Promise<AdapterReservation | null> {
+    const url = `${this.endpoint}/api/room_bookings?output_format=JSON&display=full&filter[id_order]=[${encodeURIComponent(bookingId)}]`;
+    const response = await fetch(url, { headers: this.headers });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch room booking ${bookingId}: ${response.statusText}`,
+      );
+    }
+
+    const data = (await response.json()) as QloAppsRoomBookingsResponse;
+
+    if (!data || !data.bookings) {
+      return null;
+    }
+
+    const rooms = Array.isArray(data.bookings)
+      ? data.bookings
+      : [data.bookings];
+    const room =
+      rooms.find((item) => String(item.id_order) === bookingId) ?? rooms[0];
+
+    if (!room) {
+      return null;
+    }
+
+    return this.buildReservationFromRoom(room);
+  }
+
   async pullReservations(
     startDate: string,
     endDate: string,
