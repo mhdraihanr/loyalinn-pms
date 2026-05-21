@@ -6,6 +6,7 @@ export function startPageAutoRefresh(_options: {
   refresh: () => void;
   intervalMs?: number;
 }) {
+  void _options;
   return () => {};
 }
 
