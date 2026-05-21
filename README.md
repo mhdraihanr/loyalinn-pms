@@ -22,6 +22,7 @@ A hotel operations platform that integrates Property Management Systems (PMS) wi
 - **QloApps-ready integration path** — QloApps adapter, module packaging, setup guide, and webhook-first runtime documentation.
 - **WhatsApp automation through WAHA** — session control, QR login, status polling, outbound messaging, and inbound webhook handling.
 - **Lifecycle automation engine** — idempotent inbound event handling, Postgres-backed automation jobs, retry policy, scheduler, and message logs.
+- **Duplicate-safe lifecycle sends** — status-trigger automation checks existing successful message logs before sending and only treats `on-stay` as realtime automation when a reservation actually transitions into `on-stay`.
 - **Lifecycle AI agents** — pre-arrival, on-stay, and post-stay AI workflows with tool calling and observability logs.
 - **Operations dashboard** — staff-facing dashboards with database-backed updates and room for future browser push via Supabase Realtime/SSE/WebSockets.
 - **Feedback workflow** — post-stay feedback forms, feedback monitor dashboard, 24-hour escalation, and AI follow-up handoff.
@@ -109,6 +110,8 @@ WAHA WhatsApp API
 ```
 
 **Core pattern:** inbound events are normalized, deduplicated, and written to Supabase. PMS webhook events are the primary source for reservation changes; pull sync is reserved for reconciliation and recovery. Automation jobs are claimed asynchronously, rendered from templates, sent through WAHA, and logged for observability. AI agents can create operational rows that are shown in realtime staff dashboards.
+
+Lifecycle send guardrails: a reservation must not receive the same successful lifecycle trigger twice. The status-trigger worker checks prior `message_logs` rows with `status = sent` for the same reservation and trigger before calling WAHA. Realtime QloApps `on-stay` automation is enqueueable only on a true status transition into `on-stay`; other reservation field changes while already `on-stay` must not create another `on-stay` send.
 
 For the QloApps webhook-first integration path, configure the PMS sender to call `/api/webhooks/pms`.
 

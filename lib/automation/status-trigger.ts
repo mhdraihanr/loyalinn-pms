@@ -41,6 +41,14 @@ type ReservationTenant = {
   name: string | null;
 };
 
+type MessageLogLookupClient = {
+  from: (table: "message_logs") => {
+    select: (columns: string) => {
+      eq: (column: string, value: string) => unknown;
+    };
+  };
+};
+
 function mapTriggerToLifecycleStage(
   triggerType: string,
 ): LifecycleStage | null {
@@ -73,6 +81,33 @@ function getSingleRelation<T>(value: T | T[] | null | undefined): T | null {
 
   return Array.isArray(value) ? (value[0] ?? null) : value;
 }
+
+export async function hasSuccessfulDeliveryLog(
+  adminClient: MessageLogLookupClient,
+  reservationId: string,
+  triggerType: string,
+) {
+  const query = adminClient
+    .from("message_logs")
+    .select("id")
+    .eq("reservation_id", reservationId)
+    .eq("trigger_type", triggerType)
+    .eq("status", "sent") as {
+    limit: (count: number) => Promise<{
+      data: Array<{ id: string }> | null;
+      error: { message?: string } | null;
+    }>;
+  };
+
+  const { data, error } = await query.limit(1);
+
+  if (error) {
+    throw new Error(error.message ?? "Failed to lookup existing message log");
+  }
+
+  return Boolean(data?.length);
+}
+
 function detectPreferredLanguage(
   phone: string | null,
   country: string | null,
@@ -169,18 +204,16 @@ export async function processStatusTriggerJob(job: StatusTriggerJob) {
     `[STATUS-TRIGGER-SELECT] preferred=${preferredLanguage} variantLang=${templateVariant?.language_code}`,
   );
 
-  const { data: existingSentLog } = await adminClient
-    .from("message_logs")
-    .select("id")
-    .eq("reservation_id", reservation.id)
-    .eq("trigger_type", job.triggerType)
-    .eq("status", "sent")
-    .maybeSingle();
+  const hasSuccessfulDelivery = await hasSuccessfulDeliveryLog(
+    adminClient,
+    reservation.id,
+    job.triggerType,
+  );
 
   const sendGuard = canSendAutomatedMessage({
     guestPhone: guest?.phone ?? null,
     templateVariant,
-    hasSuccessfulDelivery: Boolean(existingSentLog),
+    hasSuccessfulDelivery,
   });
 
   if (!sendGuard.allowed) {

@@ -62,6 +62,22 @@ function resolveReservationStatus(params: {
   return params.normalizedStatus || params.mappedStatus;
 }
 
+export function shouldEnqueueRealtimeStatusAutomation(params: {
+  status: string;
+  previousStatus?: string;
+  changed: boolean;
+}) {
+  if (!params.changed || !REALTIME_TRIGGERS.has(params.status)) {
+    return false;
+  }
+
+  if (params.status === "on-stay") {
+    return params.previousStatus !== "on-stay";
+  }
+
+  return true;
+}
+
 async function markInboundEventProcessed(params: {
   adminClient: SupabaseAdminClient;
   inboundEventId: string;
@@ -229,8 +245,11 @@ export async function processQloAppsWebhookEvent({
     let jobEnqueued = false;
     if (
       upsertResult.reservationId &&
-      REALTIME_TRIGGERS.has(status) &&
-      upsertResult.changed
+      shouldEnqueueRealtimeStatusAutomation({
+        status,
+        previousStatus: upsertResult.previousStatus,
+        changed: upsertResult.changed,
+      })
     ) {
       const { error: jobError } = await adminClient
         .from("automation_jobs")
