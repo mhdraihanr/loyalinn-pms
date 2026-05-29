@@ -161,7 +161,7 @@ a-proposal2/
 | pnpm               | Compatible with the checked-in lockfile        |
 | Supabase project   | PostgreSQL, Auth, Realtime, service-role key   |
 | WAHA instance      | Reachable HTTP API with API key                |
-| Google AI API key  | Required for Gemini lifecycle AI features      |
+| Gemini API key     | Required for Gemini lifecycle AI features      |
 | PMS test source    | Mock adapter or QloApps-compatible environment |
 
 ---
@@ -170,17 +170,16 @@ a-proposal2/
 
 Create a local environment file and provide the values used by your deployment.
 
-| Group                 | Variables                                                                                       |
-| --------------------- | ----------------------------------------------------------------------------------------------- |
-| App                   | `NEXT_PUBLIC_APP_URL`                                                                           |
-| Supabase              | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
-| WAHA                  | `WAHA_BASE_URL`, `WAHA_API_KEY`                                                                 |
-| PMS webhook           | `PMS_WEBHOOK_SECRET`                                                                            |
-| PMS reconciliation    | `PMS_RECONCILIATION_ENABLED`, `PMS_RECONCILIATION_CRON_SECRET`                                  |
-| PMS dev scheduler     | `PMS_DEV_SYNC_ENABLED`, `DEV_PMS_SYNC_INTERVAL_MS`                                              |
-| Automation dev worker | `DEV_AUTOMATION_SYNC_ENABLED`, `DEV_AUTOMATION_SYNC_INTERVAL_MS`                                |
-| AI                    | `GOOGLE_GENERATIVE_AI_API_KEY`, `GEMINI_MODEL`                                                  |
-| Debugging             | `LIFECYCLE_AI_DEBUG`, `AI_FEEDBACK_DEBUG`                                                       |
+| Group                 | Variables                                                                                                                                                       |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App                   | `NEXT_PUBLIC_APP_URL`                                                                                                                                           |
+| Supabase              | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`                                                                 |
+| WAHA                  | `WAHA_BASE_URL`, `WAHA_API_KEY`, `WAHA_WEBHOOK_SECRET`, `WAHA_WEBHOOK_AUTH_DISABLED`, `WAHA_WEBHOOK_URL`, `WAHA_WEBHOOK_EVENTS`, `WAHA_AUTO_CONFIGURE_WEBHOOKS` |
+| PMS webhook           | `PMS_WEBHOOK_SECRET`                                                                                                                                            |
+| PMS reconciliation    | `PMS_RECONCILIATION_ENABLED`, `PMS_RECONCILIATION_CRON_SECRET`, `CRON_SECRET`                                                                                   |
+| Automation dev worker | `DEV_AUTOMATION_SYNC_ENABLED`, `DEV_AUTOMATION_SYNC_INTERVAL_MS`                                                                                                |
+| AI                    | `GEMINI_API_KEY`, `GEMINI_MODEL`                                                                                                                                |
+| Debugging             | `LIFECYCLE_AI_DEBUG`                                                                                                                                            |
 
 Local development is standardized in the documentation around `GEMINI_MODEL=gemini-2.5-flash` for lifecycle tool-calling consistency.
 
@@ -190,7 +189,8 @@ Recommended runtime mode:
 
 - `PMS_RECONCILIATION_ENABLED=false` for normal webhook-first operation.
 - Enable reconciliation only for recovery, audits, or scheduled low-frequency safety sync.
-- Keep `PMS_DEV_SYNC_ENABLED=false` unless you intentionally need development-only pull testing.
+- If you temporarily need recovery after missed webhook delivery or downtime, set `PMS_RECONCILIATION_ENABLED=true` and call the protected reconciliation route, then switch it back to `false` after the data gap is resolved.
+- Keep `WAHA_WEBHOOK_URL` reachable from the WAHA runtime; if WAHA runs in Docker and this app runs on the host machine, use `http://host.docker.internal:3000/api/webhooks/waha` instead of `http://localhost:3000/api/webhooks/waha`.
 - The default dashboard runtime no longer performs a 10-second browser refresh loop.
 
 ---
