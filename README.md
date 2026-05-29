@@ -224,6 +224,19 @@ Open `http://localhost:3000` and follow the flow:
 3. Choose owner onboarding and create your workspace.
 4. Configure PMS, WAHA, templates, team, and AI settings from the dashboard.
 
+## QloApps Module Installation
+
+For QloApps webhook-first delivery, use the module source in `qloapps-module/loyalinnwebhooksync`.
+
+- Build the uploadable ZIP with `pnpm package:qloapps-module`.
+- The packaged file is created at `qloapps-module/dist/loyalinnwebhooksync.zip`.
+- Install it from the QloApps back office, or copy the `loyalinnwebhooksync` folder into the QloApps `modules/` directory and install it from Modules.
+- Configure `Webhook Endpoint URL`, `Tenant Key`, `Shared Secret`, and `Enabled` in the module settings.
+- `Tenant Key` must match `tenants.slug`, and `Shared Secret` must match `PMS_WEBHOOK_SECRET`.
+- If QloApps runs in Docker and this app runs on the host machine, set `Webhook Endpoint URL` to `http://host.docker.internal:3000/api/webhooks/pms`.
+- Do not use `http://localhost:3000/api/webhooks/pms` in that Docker setup, because `localhost` will point to the QloApps container itself.
+- After saving settings, use `Send Test Event` to verify connectivity and signature handling.
+
 ---
 
 ## Available Scripts
