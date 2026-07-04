@@ -31,6 +31,8 @@ import {
   IconStar,
 } from "@tabler/icons-react";
 
+import { useUserPreferences } from "@/components/settings/profile/use-user-preferences";
+import { formatUserDate, formatUserDateTime } from "@/lib/user-preferences";
 import type { FeedbackMonitorRow } from "@/lib/data/feedback";
 
 const statusColorMap: Record<FeedbackMonitorRow["feedbackStatus"], string> = {
@@ -42,32 +44,6 @@ const statusColorMap: Record<FeedbackMonitorRow["feedbackStatus"], string> = {
 };
 
 const FEEDBACK_REWARD_POINTS = 50;
-
-function formatDate(value: string | null) {
-  if (!value) {
-    return "-";
-  }
-
-  return new Date(value).toLocaleDateString("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatDateTime(value: string | null) {
-  if (!value) {
-    return "-";
-  }
-
-  return new Date(value).toLocaleString("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function statusLabel(status: FeedbackMonitorRow["feedbackStatus"]) {
   if (status === "ai_followup") {
@@ -97,6 +73,7 @@ function matchesFeedbackRow(row: FeedbackMonitorRow, query: string) {
 
 export function FeedbackMonitorTable({ rows }: { rows: FeedbackMonitorRow[] }) {
   const [query, setQuery] = useState("");
+  const preferences = useUserPreferences();
   const [selectedRow, setSelectedRow] = useState<FeedbackMonitorRow | null>(
     null,
   );
@@ -185,7 +162,7 @@ export function FeedbackMonitorTable({ rows }: { rows: FeedbackMonitorRow[] }) {
                 </Stack>
               </Table.Td>
               <Table.Td>
-                <Text size="sm">{formatDate(row.checkOutDate)}</Text>
+                <Text size="sm">{formatUserDate(row.checkOutDate, preferences)}</Text>
               </Table.Td>
               <Table.Td>
                 <Badge
@@ -219,7 +196,9 @@ export function FeedbackMonitorTable({ rows }: { rows: FeedbackMonitorRow[] }) {
                 </Text>
               </Table.Td>
               <Table.Td>
-                <Text size="sm">{formatDateTime(row.updatedAt)}</Text>
+                <Text size="sm">
+                  {formatUserDateTime(row.updatedAt, preferences)}
+                </Text>
               </Table.Td>
               <Table.Td>
                 <ActionIcon
@@ -302,14 +281,16 @@ export function FeedbackMonitorTable({ rows }: { rows: FeedbackMonitorRow[] }) {
                 <Text size="xs" c="dimmed" mb={4}>
                   Check-out
                 </Text>
-                <Text fw={600}>{formatDate(selectedRow.checkOutDate)}</Text>
+                <Text fw={600}>
+                  {formatUserDate(selectedRow.checkOutDate, preferences)}
+                </Text>
               </Paper>
 
               <Paper withBorder radius="md" p="sm">
                 <Text size="xs" c="dimmed" mb={4}>
                   Last Update
                 </Text>
-                <Text fw={600}>{formatDateTime(selectedRow.updatedAt)}</Text>
+                <Text fw={600}>{formatUserDateTime(selectedRow.updatedAt, preferences)}</Text>
               </Paper>
             </SimpleGrid>
 
@@ -325,7 +306,12 @@ export function FeedbackMonitorTable({ rows }: { rows: FeedbackMonitorRow[] }) {
                 </Text>
               </Group>
 
-              <Paper withBorder radius="md" p="sm" bg="gray.0">
+              <Paper
+                withBorder
+                radius="md"
+                p="sm"
+                style={{ background: "var(--mantine-color-body)" }}
+              >
                 <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
                   {selectedRow.comments ?? "-"}
                 </Text>

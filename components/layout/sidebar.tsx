@@ -20,6 +20,7 @@ import {
   IconSettings,
   IconBuildingSkyscraper,
   IconLogout,
+  IconUserCircle,
 } from "@tabler/icons-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -97,25 +98,35 @@ const navGroups = [
     : []),
 ];
 
-export function Sidebar({ hotelName }: { hotelName: string }) {
+type SidebarProps = {
+  hotelName: string;
+  userRole: string;
+};
+
+export function Sidebar({ hotelName, userRole }: SidebarProps) {
   const pathname = usePathname();
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const isProfileActive = pathname === "/settings/profile";
 
   return (
     <>
       <Box
         style={{
           width: 240,
-          minHeight: "100vh",
+          height: "100vh",
+          position: "sticky",
+          top: 0,
+          alignSelf: "flex-start",
           borderRight: "1px solid var(--mantine-color-gray-2)",
-          background: "white",
+          background: "var(--mantine-color-body)",
           display: "flex",
           flexDirection: "column",
           padding: "var(--mantine-spacing-md)",
+          overflow: "hidden",
         }}
       >
         {/* Logo / Hotel Name */}
-        <Group gap="xs" mb="xl" px="xs">
+        <Group gap="xs" mb="md" px="xs">
           <ThemeIcon size={32} radius="sm" variant="filled" color="blue">
             <IconBuildingSkyscraper size={18} />
           </ThemeIcon>
@@ -129,15 +140,15 @@ export function Sidebar({ hotelName }: { hotelName: string }) {
           </Stack>
         </Group>
 
-        <Divider mb="md" />
+        <Divider mb="sm" />
 
         {/* Nav links */}
         <Stack
-          gap={4}
+          gap={2}
           style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}
         >
           {navGroups.map((group) => (
-            <Box key={group.label} mb="sm">
+            <Box key={group.label} mb={8}>
               <Text size="xs" fw={600} c="dimmed" mb={4} px="sm">
                 {group.label}
               </Text>
@@ -149,10 +160,17 @@ export function Sidebar({ hotelName }: { hotelName: string }) {
                     component={Link}
                     href={item.href}
                     label={item.label}
-                    leftSection={<item.icon size={18} />}
+                    leftSection={<item.icon size={16} />}
                     active={isActive}
                     variant="light"
                     style={{ borderRadius: "var(--mantine-radius-sm)" }}
+                    styles={{
+                      root: {
+                        minHeight: 36,
+                        paddingBlock: 6,
+                        paddingInline: 10,
+                      },
+                    }}
                   />
                 );
               })}
@@ -161,6 +179,26 @@ export function Sidebar({ hotelName }: { hotelName: string }) {
         </Stack>
 
         <Divider my="md" />
+
+        <NavLink
+          component={Link}
+          href="/settings/profile"
+          label="My Profile"
+          description={userRole}
+          leftSection={<IconUserCircle size={16} />}
+          active={isProfileActive}
+          variant="light"
+          mb="xs"
+          style={{ borderRadius: "var(--mantine-radius-sm)" }}
+          styles={{
+            root: {
+              minHeight: 44,
+              paddingBlock: 6,
+              paddingInline: 10,
+            },
+            description: { textTransform: "capitalize" },
+          }}
+        />
 
         {/* Logout button */}
         <Button

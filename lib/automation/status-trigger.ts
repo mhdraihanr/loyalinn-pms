@@ -41,11 +41,19 @@ type ReservationTenant = {
   name: string | null;
 };
 
+type MessageLogLookupResult = {
+  data: Array<{ id: string }> | null;
+  error: { message?: string } | null;
+};
+
+type MessageLogLookupQuery = {
+  eq: (column: string, value: string) => MessageLogLookupQuery;
+  limit: (count: number) => Promise<MessageLogLookupResult>;
+};
+
 type MessageLogLookupClient = {
   from: (table: "message_logs") => {
-    select: (columns: string) => {
-      eq: (column: string, value: string) => unknown;
-    };
+    select: (columns: string) => MessageLogLookupQuery;
   };
 };
 
@@ -87,19 +95,13 @@ export async function hasSuccessfulDeliveryLog(
   reservationId: string,
   triggerType: string,
 ) {
-  const query = adminClient
+  const { data, error } = await adminClient
     .from("message_logs")
     .select("id")
     .eq("reservation_id", reservationId)
     .eq("trigger_type", triggerType)
-    .eq("status", "sent") as {
-    limit: (count: number) => Promise<{
-      data: Array<{ id: string }> | null;
-      error: { message?: string } | null;
-    }>;
-  };
-
-  const { data, error } = await query.limit(1);
+    .eq("status", "sent")
+    .limit(1);
 
   if (error) {
     throw new Error(error.message ?? "Failed to lookup existing message log");
@@ -204,8 +206,10 @@ export async function processStatusTriggerJob(job: StatusTriggerJob) {
     `[STATUS-TRIGGER-SELECT] preferred=${preferredLanguage} variantLang=${templateVariant?.language_code}`,
   );
 
+  const messageLogLookupClient =
+    adminClient as unknown as MessageLogLookupClient;
   const hasSuccessfulDelivery = await hasSuccessfulDeliveryLog(
-    adminClient,
+    messageLogLookupClient,
     reservation.id,
     job.triggerType,
   );

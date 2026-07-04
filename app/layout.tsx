@@ -6,6 +6,7 @@ import {
   createTheme,
 } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
+import { UserPreferencesProvider } from "@/components/settings/profile/user-preferences-provider";
 import "./globals.css";
 
 const theme = createTheme({
@@ -26,12 +27,14 @@ export default function RootLayout({
   return (
     <html lang="en" {...mantineHtmlProps}>
       <head>
-        <ColorSchemeScript defaultColorScheme="light" />
+        <ColorSchemeScript defaultColorScheme="auto" />
       </head>
       <body suppressHydrationWarning>
-        <MantineProvider theme={theme} defaultColorScheme="light">
-          <Notifications position="top-right" />
-          {children}
+        <MantineProvider theme={theme} defaultColorScheme="auto">
+          <UserPreferencesProvider>
+            <Notifications position="top-right" />
+            {children}
+          </UserPreferencesProvider>
         </MantineProvider>
       </body>
     </html>

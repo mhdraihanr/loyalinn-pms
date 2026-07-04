@@ -13,6 +13,8 @@ import {
   ThemeIcon,
 } from "@mantine/core";
 import { IconBed, IconSearch } from "@tabler/icons-react";
+import { useUserPreferences } from "@/components/settings/profile/use-user-preferences";
+import { formatUserDate } from "@/lib/user-preferences";
 
 export type ReservationWithGuest = {
   id: string;
@@ -38,15 +40,6 @@ const statusColors: Record<string, string> = {
   cancelled: "red",
 };
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "—";
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
 function formatCurrency(amount: number | null): string {
   if (amount === null || amount === undefined) return "—";
   return new Intl.NumberFormat("en-US", {
@@ -71,6 +64,7 @@ export function ReservationsTable({
   reservations: ReservationWithGuest[];
 }) {
   const [query, setQuery] = useState("");
+  const preferences = useUserPreferences();
 
   const filteredReservations = useMemo(
     () =>
@@ -157,10 +151,10 @@ export function ReservationsTable({
                 <Table.Td>
                   <Stack gap={1}>
                     <Text size="sm" fw={500}>
-                      {formatDate(reservation.check_in_date)}
+                      {formatUserDate(reservation.check_in_date, preferences)}
                     </Text>
                     <Text size="xs" c="dimmed">
-                      to {formatDate(reservation.check_out_date)}
+                      to {formatUserDate(reservation.check_out_date, preferences)}
                     </Text>
                   </Stack>
                 </Table.Td>
