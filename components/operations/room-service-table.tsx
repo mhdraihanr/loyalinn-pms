@@ -16,6 +16,8 @@ import {
 import { IconSearch, IconToolsKitchen2 } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
 import { updateRoomServiceStatus } from "@/lib/actions/operations";
+import { useUserPreferences } from "@/components/settings/profile/use-user-preferences";
+import { formatUserTime } from "@/lib/user-preferences";
 
 type RoomServiceItem = {
   name: string;
@@ -70,6 +72,7 @@ export function RoomServiceTable({
 }) {
   const [orders, setOrders] = useState<RoomServiceOrder[]>(initialData);
   const [query, setQuery] = useState("");
+  const preferences = useUserPreferences();
   const supabase = createClient();
 
   const filteredOrders = useMemo(
@@ -190,7 +193,7 @@ export function RoomServiceTable({
               <Table.Tr key={order.id}>
                 <Table.Td>
                   <Text size="sm">
-                    {new Date(order.created_at).toLocaleTimeString()}
+                    {formatUserTime(order.created_at, preferences)}
                   </Text>
                 </Table.Td>
                 <Table.Td>

@@ -14,6 +14,8 @@ import {
   ThemeIcon,
 } from "@mantine/core";
 import { IconSearch, IconUsers } from "@tabler/icons-react";
+import { useUserPreferences } from "@/components/settings/profile/use-user-preferences";
+import { formatUserDate } from "@/lib/user-preferences";
 
 type Guest = {
   id: string;
@@ -32,15 +34,6 @@ const tierColors: Record<string, string> = {
   gold: "yellow",
   platinum: "cyan",
 };
-
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "—";
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 function getInitials(name: string | null): string {
   if (!name) return "?";
@@ -64,6 +57,7 @@ function matchesGuest(guest: Guest, query: string) {
 
 export function GuestsTable({ guests }: { guests: Guest[] }) {
   const [query, setQuery] = useState("");
+  const preferences = useUserPreferences();
 
   const filteredGuests = useMemo(
     () => guests.filter((guest) => matchesGuest(guest, query)),
@@ -187,7 +181,7 @@ export function GuestsTable({ guests }: { guests: Guest[] }) {
                 </Table.Td>
                 <Table.Td>
                   <Text size="sm" c="dimmed">
-                    {formatDate(guest.created_at)}
+                    {formatUserDate(guest.created_at, preferences)}
                   </Text>
                 </Table.Td>
               </Table.Tr>

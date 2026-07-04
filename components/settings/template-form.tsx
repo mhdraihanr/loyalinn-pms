@@ -189,7 +189,10 @@ export function TemplateForm({
             <Textarea
               label="Message Content"
               placeholder={`Hello {{guestName}}, welcome to {{hotelName}}!`}
+              autosize
               minRows={4}
+              maxRows={14}
+              resize="vertical"
               value={variant.content}
               onChange={(e) =>
                 handleContentChange(index, e.currentTarget.value)

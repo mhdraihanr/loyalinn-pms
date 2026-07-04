@@ -178,7 +178,13 @@ export default async function DashboardPage() {
 
             <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
               {operationalItems.map((item) => (
-                <Card key={item.label} radius="md" padding="md" bg="gray.0">
+                <Card
+                  key={item.label}
+                  withBorder
+                  radius="md"
+                  padding="md"
+                  style={{ background: "var(--mantine-color-body)" }}
+                >
                   <Stack gap={8}>
                     <ThemeIcon
                       color={item.color}

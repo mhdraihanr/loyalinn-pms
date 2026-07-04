@@ -16,6 +16,8 @@ import {
 import { IconDoorEnter, IconSearch } from "@tabler/icons-react";
 import { updateArrivalRequestStatus } from "@/lib/actions/operations";
 import { createClient } from "@/lib/supabase/client";
+import { useUserPreferences } from "@/components/settings/profile/use-user-preferences";
+import { formatUserTime } from "@/lib/user-preferences";
 
 export type ArrivalRequest = {
   id: string;
@@ -76,6 +78,7 @@ export function ArrivalRequestsTable({
 }) {
   const [requests, setRequests] = useState<ArrivalRequest[]>(initialData);
   const [query, setQuery] = useState("");
+  const preferences = useUserPreferences();
   const supabase = createClient();
 
   const filteredRequests = useMemo(
@@ -196,7 +199,7 @@ export function ArrivalRequestsTable({
           <Table.Tr key={request.id}>
             <Table.Td>
               <Text size="sm">
-                {new Date(request.created_at).toLocaleTimeString()}
+                {formatUserTime(request.created_at, preferences)}
               </Text>
             </Table.Td>
             <Table.Td>

@@ -16,6 +16,8 @@ import {
 import { IconBed, IconSearch } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
 import { updateHousekeepingStatus } from "@/lib/actions/operations";
+import { useUserPreferences } from "@/components/settings/profile/use-user-preferences";
+import { formatUserTime } from "@/lib/user-preferences";
 
 export type HousekeepingRequest = {
   id: string;
@@ -111,6 +113,7 @@ export function HousekeepingTable({
 }) {
   const [requests, setRequests] = useState<HousekeepingRequest[]>(initialData);
   const [query, setQuery] = useState("");
+  const preferences = useUserPreferences();
   const supabase = createClient();
 
   const filteredRequests = useMemo(
@@ -228,7 +231,7 @@ export function HousekeepingTable({
               <Table.Tr key={req.id}>
                 <Table.Td>
                   <Text size="sm">
-                    {new Date(req.created_at).toLocaleTimeString()}
+                    {formatUserTime(req.created_at, preferences)}
                   </Text>
                 </Table.Td>
                 <Table.Td>

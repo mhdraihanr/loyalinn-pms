@@ -35,13 +35,13 @@ export default async function DashboardLayout({
   const hotelName = tenantName ?? "Your Hotel";
 
   return (
-    <Box style={{ display: "flex", minHeight: "100vh" }}>
-      <Sidebar hotelName={hotelName} />
+    <Box style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+      <Sidebar hotelName={hotelName} userRole={tenantUser.role} />
       <Box
         component="main"
         style={{
           flex: 1,
-          background: "var(--mantine-color-gray-0)",
+          background: "var(--mantine-color-body)",
           padding: "var(--mantine-spacing-xl)",
           overflowY: "auto",
         }}
