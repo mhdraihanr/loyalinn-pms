@@ -10,3 +10,15 @@ body {
   margin: 0;
   padding: 0;
 }
+
+.login-split-shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(360px, 2fr);
+}
+
+@media (max-width: 768px) {
+  .login-split-shell {
+    grid-template-columns: 1fr;
+  }
+}

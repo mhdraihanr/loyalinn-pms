@@ -1,4 +1,4 @@
-import { Box, Center } from "@mantine/core";
+import { Box } from "@mantine/core";
 import type { ReactNode } from "react";
 
 export default function AuthLayout({ children }: { children: ReactNode }) {
@@ -6,10 +6,10 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
     <Box
       style={{
         minHeight: "100vh",
-        background: "var(--mantine-color-gray-0)",
+        background: "#ffffff",
       }}
     >
-      <Center style={{ minHeight: "100vh" }}>{children}</Center>
+      {children}
     </Box>
   );
 }
