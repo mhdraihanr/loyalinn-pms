@@ -12,8 +12,13 @@ export function UserPreferencesProvider({ children }: { children: React.ReactNod
     const supabase = createClient();
 
     supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) {
+        setColorScheme("light");
+        return;
+      }
+
       const preferences = getUserPreferencesFromMetadata(
-        data.user?.user_metadata ?? {},
+        data.user.user_metadata ?? {},
       );
 
       setColorScheme(
