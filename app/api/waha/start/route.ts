@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { wahaClient } from "@/lib/waha/client";
+import { wahaClient, type WahaSessionConfig } from "@/lib/waha/client";
 import { getCurrentUserTenant } from "@/lib/auth/tenant";
 
 const DEFAULT_WEBHOOK_EVENTS = ["message.any"];
@@ -101,7 +101,7 @@ function hasEquivalentGlobalWebhook(target: WebhookTarget) {
   );
 }
 
-function buildWebhookConfig() {
+function buildWebhookConfig(): WahaSessionConfig {
   const hmacKey =
     process.env.WAHA_WEBHOOK_SECRET?.trim() ||
     process.env.PMS_WEBHOOK_SECRET?.trim() ||
@@ -123,6 +123,60 @@ function buildWebhookConfig() {
   };
 }
 
+function parseBooleanEnv(value: string | undefined, fallback: boolean) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
+}
+
+function buildNowebStoreConfig(): WahaSessionConfig {
+  const storeEnabled = parseBooleanEnv(
+    process.env.WAHA_NOWEB_STORE_ENABLED,
+    true,
+  );
+  const fullSync = parseBooleanEnv(process.env.WAHA_NOWEB_FULL_SYNC, true);
+
+  return {
+    noweb: {
+      store: {
+        enabled: storeEnabled,
+        fullSync,
+      },
+    },
+  };
+}
+
+function mergeSessionConfigs(
+  ...configs: WahaSessionConfig[]
+): WahaSessionConfig {
+  return configs.reduce<WahaSessionConfig>(
+    (mergedConfig, config) => ({
+      ...mergedConfig,
+      ...config,
+      webhooks: config.webhooks ?? mergedConfig.webhooks,
+      noweb: config.noweb
+        ? {
+            ...mergedConfig.noweb,
+            ...config.noweb,
+            store: config.noweb.store ?? mergedConfig.noweb?.store,
+          }
+        : mergedConfig.noweb,
+    }),
+    {},
+  );
+}
+
 export async function POST() {
   const userTenant = await getCurrentUserTenant();
   if (!userTenant)
@@ -133,10 +187,11 @@ export async function POST() {
 
     // WAHA Core free version only supports 1 session, typically named "default"
     // In a multi-tenant paid setup, this would be userTenant.tenantId
-    const result = await wahaClient.startSession(sessionName);
-
     const shouldAutoConfigureWebhooks =
       process.env.WAHA_AUTO_CONFIGURE_WEBHOOKS !== "false";
+    const nowebStoreConfig = buildNowebStoreConfig();
+    const result = await wahaClient.startSession(sessionName, nowebStoreConfig);
+
     let webhooksConfigured = false;
     let webhooksSkipReason:
       | "auto-config-disabled"
@@ -150,7 +205,10 @@ export async function POST() {
       if (primaryWebhook && hasEquivalentGlobalWebhook(primaryWebhook)) {
         webhooksSkipReason = "global-webhook-configured";
       } else {
-        await wahaClient.updateSessionConfig(sessionName, webhookConfig);
+        await wahaClient.updateSessionConfig(
+          sessionName,
+          mergeSessionConfigs(nowebStoreConfig, webhookConfig),
+        );
         webhooksConfigured = true;
       }
     } else {
@@ -160,6 +218,8 @@ export async function POST() {
     return NextResponse.json({
       ...result,
       session: sessionName,
+      nowebStoreConfigured: nowebStoreConfig.noweb?.store?.enabled ?? false,
+      nowebFullSync: nowebStoreConfig.noweb?.store?.fullSync ?? false,
       webhooksConfigured,
       ...(webhooksSkipReason ? { webhooksSkipReason } : {}),
     });
