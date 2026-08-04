@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Box } from "@mantine/core";
 import { Sidebar } from "@/components/layout/sidebar";
+import { WhatsappInboxButton } from "@/components/layout/whatsapp-inbox-button";
 import type { ReactNode } from "react";
 
 export default async function DashboardLayout({
@@ -48,6 +49,7 @@ export default async function DashboardLayout({
       >
         {children}
       </Box>
+      <WhatsappInboxButton />
     </Box>
   );
 }

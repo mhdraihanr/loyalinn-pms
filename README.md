@@ -21,6 +21,7 @@ A hotel operations platform that integrates Property Management Systems (PMS) wi
 - **Low-frequency reconciliation fallback** — pull sync remains available as an explicit recovery/reconciliation path instead of the primary production mechanism.
 - **QloApps-ready integration path** — QloApps adapter, module packaging, setup guide, and webhook-first runtime documentation.
 - **WhatsApp automation through WAHA** — session control, QR login, status polling, outbound messaging, and inbound webhook handling.
+- **Manual WhatsApp inbox** — dashboard floating chat drawer for all WAHA chats with manual refresh, protected API proxy routes, and no browser-exposed WAHA API key.
 - **Lifecycle automation engine** — idempotent inbound event handling, Postgres-backed automation jobs, retry policy, scheduler, and message logs.
 - **Duplicate-safe lifecycle sends** — status-trigger automation checks existing successful message logs before sending and only treats `on-stay` as realtime automation when a reservation actually transitions into `on-stay`.
 - **Lifecycle AI agents** — pre-arrival, on-stay, and post-stay AI workflows with tool calling and observability logs.
@@ -81,7 +82,7 @@ Next.js API Routes
     ├── /api/webhooks/pms          → webhook-first PMS ingress
     ├── /api/cron/pms-sync         → explicit fallback reconciliation
     ├── /api/cron/automation       → automation worker
-    └── /api/waha/*                → WAHA session control
+    └── /api/waha/*                → WAHA session control and protected chat proxy routes
     │
     ▼
 Supabase PostgreSQL
@@ -174,7 +175,7 @@ Create a local environment file and provide the values used by your deployment.
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | App                   | `NEXT_PUBLIC_APP_URL`                                                                                                                                           |
 | Supabase              | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`                                                                 |
-| WAHA                  | `WAHA_BASE_URL`, `WAHA_API_KEY`, `WAHA_WEBHOOK_SECRET`, `WAHA_WEBHOOK_AUTH_DISABLED`, `WAHA_WEBHOOK_URL`, `WAHA_WEBHOOK_EVENTS`, `WAHA_AUTO_CONFIGURE_WEBHOOKS` |
+| WAHA                  | `WAHA_BASE_URL`, `WAHA_API_KEY`, `WAHA_WEBHOOK_SECRET`, `WAHA_WEBHOOK_AUTH_DISABLED`, `WAHA_WEBHOOK_URL`, `WAHA_WEBHOOK_EVENTS`, `WAHA_AUTO_CONFIGURE_WEBHOOKS`, `WAHA_NOWEB_STORE_ENABLED`, `WAHA_NOWEB_FULL_SYNC` |
 | PMS webhook           | `PMS_WEBHOOK_SECRET`                                                                                                                                            |
 | PMS reconciliation    | `PMS_RECONCILIATION_ENABLED`, `PMS_RECONCILIATION_CRON_SECRET`, `CRON_SECRET`                                                                                   |
 | Automation dev worker | `DEV_AUTOMATION_SYNC_ENABLED`, `DEV_AUTOMATION_SYNC_INTERVAL_MS`                                                                                                |
@@ -291,4 +292,7 @@ Important database practices:
 - Enable `LIFECYCLE_AI_DEBUG=true` only during focused AI routing or tool-calling triage.
 - WAHA webhook duplication can happen when both global and session webhooks are configured with overlapping events; current guardrails normalize events and skip redundant registration when a global webhook is already present.
 - The Operations dashboard shows active AI-generated operational rows; completed, resolved, or cancelled rows remain in the database for audit/history.
+- The manual WhatsApp inbox reads all chats directly from WAHA through authenticated Next.js proxy routes, refreshes only when staff click refresh/open/select/send, and does not persist all WhatsApp chats to Supabase.
+- WAHA chat history availability depends on the selected WAHA engine and store configuration. The recommended runtime for stable inbox history is `WHATSAPP_DEFAULT_ENGINE=NOWEB` with `WAHA_NOWEB_STORE_ENABLED=true` before scanning a fresh session QR.
+- If migrating an existing local WAHA session from `WEBJS` to `NOWEB`, back up the old session folder, use the `.waha_sessions` volume, start WAHA, reconnect the `default` session, and scan QR again so NOWEB store can initialize cleanly.
 - Some historical verification notes mention unrelated pre-existing lint or type-check failures. Check the latest task-specific document before treating those as regressions.

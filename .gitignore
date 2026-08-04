@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+.waha_data/
+.waha_sessions/
 
 # debug
 npm-debug.log*

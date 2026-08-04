@@ -14,14 +14,16 @@ services:
 
       # Kredensial API WAHA (sama dengan di .env.local kamu)
       - WHATSAPP_API_KEY=raihan-secret-key
-      - WHATSAPP_DEFAULT_ENGINE=WEBJS
+      # NOWEB + store membuat endpoint chats/messages lebih stabil untuk inbox history.
+      # Setelah mengganti engine dari WEBJS, backup/hapus data session lama lalu scan QR ulang.
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
 
       # Global webhook agar event inbound langsung dikirim ke Next.js webhook route
       # host.docker.internal digunakan karena WAHA berjalan di container
       - WHATSAPP_HOOK_URL=http://host.docker.internal:3000/api/webhooks/waha
       - WHATSAPP_HOOK_EVENTS=message.any
     volumes:
-      # Menyimpan data session WA agar tidak perlu scan QR tiap kali restart
-      - ./.waha_data:/app/.waha
+      # Menyimpan session dan NOWEB store chats/messages agar history tetap tersedia
+      - ./.waha_sessions:/app/.sessions
     # Opsi ini membuat WAHA selalu auto-start selama Docker menyala!
     restart: always

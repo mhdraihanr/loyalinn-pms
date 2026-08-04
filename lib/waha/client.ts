@@ -20,14 +20,58 @@ type WahaWebhookConfig = {
   }>;
 };
 
-type WahaSessionConfig = {
+export type WahaSessionConfig = {
   webhooks?: WahaWebhookConfig[];
+  noweb?: {
+    markOnline?: boolean;
+    store?: {
+      enabled: boolean;
+      fullSync: boolean;
+    };
+  };
 };
 
 type WahaLidMapping = {
   lid: string;
   pn: string;
 };
+
+export type WahaChatMessage = {
+  id?: unknown;
+  timestamp?: number | string | null;
+  from?: unknown;
+  fromMe?: boolean;
+  from_me?: boolean;
+  to?: unknown;
+  body?: unknown;
+  text?: unknown;
+  caption?: unknown;
+  content?: unknown;
+  _data?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type WahaChatOverview = {
+  id: string;
+  name?: string | null;
+  picture?: string | null;
+  lastMessage?: WahaChatMessage | null;
+  _chat?: unknown;
+  [key: string]: unknown;
+};
+
+type WahaChatsOverviewOptions = {
+  limit?: number;
+  offset?: number;
+};
+
+type WahaChatMessagesOptions = {
+  limit?: number;
+};
+
+function encodePathSegment(value: string) {
+  return encodeURIComponent(value);
+}
 
 function normalizeWhatsAppChatId(chatId: string) {
   const trimmedChatId = chatId.trim();
@@ -77,14 +121,53 @@ export const wahaClient = {
   getSessions: async () =>
     apiClient.get("/api/sessions?all=true").then((res) => res.data),
   getSession: async (session: string) =>
-    apiClient.get(`/api/sessions/${session}`).then((res) => res.data),
-  startSession: async (session: string) =>
     apiClient
-      .post("/api/sessions/start", { name: session })
+      .get(`/api/sessions/${encodePathSegment(session)}`)
+      .then((res) => res.data),
+  getChatsOverview: async (
+    session: string,
+    options: WahaChatsOverviewOptions = {},
+  ): Promise<WahaChatOverview[]> => {
+    const limit = options.limit ?? 20;
+    const offset = options.offset ?? 0;
+
+    return apiClient
+      .get(`/api/${encodePathSegment(session)}/chats/overview`, {
+        params: { limit, offset },
+      })
+      .then((res) => res.data as WahaChatOverview[]);
+  },
+  getChatMessages: async (
+    session: string,
+    chatId: string,
+    options: WahaChatMessagesOptions = {},
+  ): Promise<WahaChatMessage[]> => {
+    const limit = options.limit ?? 50;
+
+    return apiClient
+      .get(
+        `/api/${encodePathSegment(session)}/chats/${encodePathSegment(chatId)}/messages`,
+        { params: { limit } },
+      )
+      .then((res) => res.data as WahaChatMessage[]);
+  },
+  readChatMessages: async (session: string, chatId: string) =>
+    apiClient
+      .post(
+        `/api/${encodePathSegment(session)}/chats/${encodePathSegment(chatId)}/messages/read`,
+        {},
+      )
+      .then((res) => res.data),
+  startSession: async (session: string, config?: WahaSessionConfig) =>
+    apiClient
+      .post("/api/sessions/start", {
+        name: session,
+        ...(config ? { config } : {}),
+      })
       .then((res) => res.data),
   updateSessionConfig: async (session: string, config: WahaSessionConfig) =>
     apiClient
-      .put(`/api/sessions/${session}`, {
+      .put(`/api/sessions/${encodePathSegment(session)}`, {
         name: session,
         config,
       })
@@ -100,7 +183,9 @@ export const wahaClient = {
 
     try {
       return await apiClient
-        .get(`/api/${session}/lids/${encodeURIComponent(trimmedLid)}`)
+        .get(
+          `/api/${encodePathSegment(session)}/lids/${encodePathSegment(trimmedLid)}`,
+        )
         .then((res) => res.data as WahaLidMapping);
     } catch (error: unknown) {
       if (axios.isAxiosError(error) && error.response?.status === 404) {
@@ -111,7 +196,9 @@ export const wahaClient = {
     }
   },
   getQR: async (session: string) =>
-    apiClient.get(`/api/${session}/auth/qr`).then((res) => res.data),
+    apiClient
+      .get(`/api/${encodePathSegment(session)}/auth/qr`)
+      .then((res) => res.data),
   logoutSession: async (session: string) =>
     apiClient
       .post(`/api/sessions/logout`, { name: session })
