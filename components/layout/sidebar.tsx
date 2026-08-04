@@ -78,6 +78,7 @@ const navGroups = [
         label: "AI Requests ",
         icon: IconLayoutDashboard, // You can change this later to IconConciergeBell or similar
       },
+      { href: "/settings/service-catalog", label: "Menu & Facilities", icon: IconSettings },
     ],
   },
   {

@@ -4,11 +4,13 @@ import {
   resolveTenantIdForWebhook,
   type TenantLookupClient,
 } from "@/lib/automation/tenant-resolver";
+import { enqueueStatusTriggerAutomationJobIfMissing } from "@/lib/automation/queue";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 import type { PMSAdapter } from "./adapter";
 import { getPMSAdapter } from "./registry";
 import { upsertPmsReservation } from "./reservation-upsert-service";
+import { resolveStatusAutomationTrigger } from "./status-automation";
 
 type QloAppsNormalizedEvent = NormalizedPmsWebhookEvent & {
   tenantId: string;
@@ -41,7 +43,6 @@ type ProcessQloAppsWebhookEventResult =
       error: string;
     };
 
-const REALTIME_TRIGGERS = new Set(["on-stay", "cancelled"]);
 const EVENTS_USING_ADAPTER_STATUS = new Set([
   "booking.created",
   "booking.payment_confirmed",
@@ -65,17 +66,15 @@ function resolveReservationStatus(params: {
 export function shouldEnqueueRealtimeStatusAutomation(params: {
   status: string;
   previousStatus?: string;
-  changed: boolean;
+  statusChanged: boolean;
 }) {
-  if (!params.changed || !REALTIME_TRIGGERS.has(params.status)) {
-    return false;
-  }
-
-  if (params.status === "on-stay") {
-    return params.previousStatus !== "on-stay";
-  }
-
-  return true;
+  return Boolean(
+    resolveStatusAutomationTrigger({
+      previousStatus: params.previousStatus,
+      nextStatus: params.status,
+      statusChanged: params.statusChanged,
+    }),
+  );
 }
 
 async function markInboundEventProcessed(params: {
@@ -239,40 +238,50 @@ export async function processQloAppsWebhookEvent({
     });
 
     if (inboundEventId) {
+      const { error: eventUpdateError } = await adminClient
+        .from("inbound_events")
+        .update({
+          payload: {
+            ...payload,
+            reservation_id: upsertResult.reservationId,
+            booking_id: normalizedEvent.bookingId,
+            previous_status: upsertResult.previousStatus ?? null,
+            status: upsertResult.nextStatus,
+            occurred_at: normalizedEvent.updatedAt ?? null,
+          },
+        })
+        .eq("id", inboundEventId);
+
+      if (eventUpdateError) {
+        throw new Error(eventUpdateError.message);
+      }
+
       await markInboundEventProcessed({ adminClient, inboundEventId });
     }
 
+    const triggerType = resolveStatusAutomationTrigger({
+      previousStatus: upsertResult.previousStatus,
+      nextStatus: upsertResult.nextStatus,
+      statusChanged: upsertResult.statusChanged,
+    });
+
     let jobEnqueued = false;
-    if (
-      upsertResult.reservationId &&
-      shouldEnqueueRealtimeStatusAutomation({
-        status,
-        previousStatus: upsertResult.previousStatus,
-        changed: upsertResult.changed,
-      })
-    ) {
-      const { error: jobError } = await adminClient
-        .from("automation_jobs")
-        .insert({
-          tenant_id: tenantId,
-          reservation_id: upsertResult.reservationId,
-          job_type: "status-trigger",
-          trigger_type: status,
-          status: "pending",
-          payload: {
-            inbound_event_id: inboundEventId,
-            event_type: normalizedEvent.eventType,
-            booking_id: normalizedEvent.bookingId,
-            status,
-            updated_at: normalizedEvent.updatedAt ?? null,
-          },
-        });
-
-      if (jobError) {
-        throw new Error(jobError.message);
-      }
-
-      jobEnqueued = true;
+    if (upsertResult.reservationId && triggerType) {
+      const result = await enqueueStatusTriggerAutomationJobIfMissing({
+        tenantId,
+        reservationId: upsertResult.reservationId,
+        triggerType,
+        payload: {
+          inbound_event_id: inboundEventId,
+          event_type: normalizedEvent.eventType,
+          booking_id: normalizedEvent.bookingId,
+          status: upsertResult.nextStatus,
+          previous_status: upsertResult.previousStatus ?? null,
+          updated_at: normalizedEvent.updatedAt ?? null,
+        },
+        adminClient,
+      });
+      jobEnqueued = result.enqueued;
     }
 
     return {

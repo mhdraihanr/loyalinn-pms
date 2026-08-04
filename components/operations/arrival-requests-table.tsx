@@ -13,7 +13,8 @@ import {
   TextInput,
   ThemeIcon,
 } from "@mantine/core";
-import { IconDoorEnter, IconSearch } from "@tabler/icons-react";
+import { IconDoorEnter, IconMessageCircle, IconSearch } from "@tabler/icons-react";
+import { OperationChatDrawer } from "@/components/operations/operation-chat-drawer";
 import { updateArrivalRequestStatus } from "@/lib/actions/operations";
 import { createClient } from "@/lib/supabase/client";
 import { useUserPreferences } from "@/components/settings/profile/use-user-preferences";
@@ -21,6 +22,8 @@ import { formatUserTime } from "@/lib/user-preferences";
 
 export type ArrivalRequest = {
   id: string;
+  reservation_id: string | null;
+  guest_id: string | null;
   room_number: string;
   request_type: "arrival_eta" | "early_checkin";
   eta: string | null;
@@ -28,7 +31,7 @@ export type ArrivalRequest = {
   details: Record<string, unknown> | null;
   status: string;
   created_at: string;
-  guests: { name: string } | null;
+  guests: { name: string; phone: string | null } | null;
   reservations: { check_in_date: string } | null;
 };
 
@@ -78,6 +81,7 @@ export function ArrivalRequestsTable({
 }) {
   const [requests, setRequests] = useState<ArrivalRequest[]>(initialData);
   const [query, setQuery] = useState("");
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const preferences = useUserPreferences();
   const supabase = createClient();
 
@@ -239,6 +243,14 @@ export function ArrivalRequestsTable({
             </Table.Td>
             <Table.Td>
               <Group gap="xs">
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  leftSection={<IconMessageCircle size={14} />}
+                  onClick={() => setSelectedRequestId(request.id)}
+                >
+                  Detail
+                </Button>
                 {request.status === "pending" && (
                   <Button
                     size="xs"
@@ -276,6 +288,12 @@ export function ArrivalRequestsTable({
       </Table.Tbody>
     </Table>
       )}
+      <OperationChatDrawer
+        opened={Boolean(selectedRequestId)}
+        operationType="arrival-requests"
+        operationId={selectedRequestId}
+        onClose={() => setSelectedRequestId(null)}
+      />
     </Stack>
   );
 }

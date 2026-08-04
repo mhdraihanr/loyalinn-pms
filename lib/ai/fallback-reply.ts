@@ -37,8 +37,14 @@ const GENERIC_HANDOFF_FALLBACK: Record<LifecycleLanguage, string> = {
   en: "Noted, your request has been recorded and forwarded to our hotel team for follow-up.",
 };
 
+export function normalizeWhatsAppMarkdown(value: string) {
+  return value.replace(/\*\*([^*\n]+)\*\*/g, "*$1*");
+}
+
 function stripSystemPrefix(value: string) {
-  return value.replace(SYSTEM_INFO_PREFIX_PATTERN, "").trim();
+  return normalizeWhatsAppMarkdown(
+    value.replace(SYSTEM_INFO_PREFIX_PATTERN, "").trim(),
+  );
 }
 
 function hasStepError(step: { content?: ReadonlyArray<{ type?: string }> }) {
@@ -56,7 +62,7 @@ export function extractFallbackReplyFromToolResults(
 ): string {
   const directText = typeof result.text === "string" ? result.text.trim() : "";
   if (directText) {
-    return directText;
+    return normalizeWhatsAppMarkdown(directText);
   }
 
   const steps = result.steps ?? [];

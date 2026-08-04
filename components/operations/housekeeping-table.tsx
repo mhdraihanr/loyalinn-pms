@@ -13,7 +13,8 @@ import {
   TextInput,
   ThemeIcon,
 } from "@mantine/core";
-import { IconBed, IconSearch } from "@tabler/icons-react";
+import { IconBed, IconMessageCircle, IconSearch } from "@tabler/icons-react";
+import { OperationChatDrawer } from "@/components/operations/operation-chat-drawer";
 import { createClient } from "@/lib/supabase/client";
 import { updateHousekeepingStatus } from "@/lib/actions/operations";
 import { useUserPreferences } from "@/components/settings/profile/use-user-preferences";
@@ -21,12 +22,14 @@ import { formatUserTime } from "@/lib/user-preferences";
 
 export type HousekeepingRequest = {
   id: string;
+  reservation_id: string | null;
+  guest_id: string | null;
   room_number: string;
   request_type: string;
   details: Record<string, unknown> | null;
   status: string;
   created_at: string;
-  guests: { name: string } | null;
+  guests: { name: string; phone: string | null } | null;
 };
 
 const statusColors: Record<string, string> = {
@@ -113,6 +116,7 @@ export function HousekeepingTable({
 }) {
   const [requests, setRequests] = useState<HousekeepingRequest[]>(initialData);
   const [query, setQuery] = useState("");
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const preferences = useUserPreferences();
   const supabase = createClient();
 
@@ -286,6 +290,14 @@ export function HousekeepingTable({
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs">
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      leftSection={<IconMessageCircle size={14} />}
+                      onClick={() => setSelectedRequestId(req.id)}
+                    >
+                      Detail
+                    </Button>
                     {req.status === "pending" && (
                       <Button
                         size="xs"
@@ -313,6 +325,12 @@ export function HousekeepingTable({
           </Table.Tbody>
         </Table>
       )}
+      <OperationChatDrawer
+        opened={Boolean(selectedRequestId)}
+        operationType="housekeeping"
+        operationId={selectedRequestId}
+        onClose={() => setSelectedRequestId(null)}
+      />
     </Stack>
   );
 }

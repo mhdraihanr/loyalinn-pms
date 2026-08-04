@@ -15,7 +15,7 @@ A hotel operations platform that integrates Property Management Systems (PMS) wi
 
 ## Features
 
-- **Role-based access control** — owners manage settings, team members, PMS, WAHA, templates, and AI settings; staff focus on operational hotel data.
+- **Role-based access control** — owners manage settings, team members, PMS, WAHA, templates, AI settings, and service catalog configuration; staff focus on operational hotel data.
 - **Supabase Auth and RLS** — access-scoped tables are protected with Row Level Security and `SECURITY DEFINER` helpers to avoid recursive policy failures.
 - **Webhook-first PMS ingestion** — QloApps events are the primary trigger for inbound reservation synchronization and status-driven automation.
 - **Low-frequency reconciliation fallback** — pull sync remains available as an explicit recovery/reconciliation path instead of the primary production mechanism.
@@ -24,8 +24,9 @@ A hotel operations platform that integrates Property Management Systems (PMS) wi
 - **Manual WhatsApp inbox** — dashboard floating chat drawer for all WAHA chats with manual refresh, protected API proxy routes, and no browser-exposed WAHA API key.
 - **Lifecycle automation engine** — idempotent inbound event handling, Postgres-backed automation jobs, retry policy, scheduler, and message logs.
 - **Duplicate-safe lifecycle sends** — status-trigger automation checks existing successful message logs before sending and only treats `on-stay` as realtime automation when a reservation actually transitions into `on-stay`.
-- **Lifecycle AI agents** — pre-arrival, on-stay, and post-stay AI workflows with tool calling and observability logs.
-- **Operations dashboard** — staff-facing dashboards with database-backed updates and room for future browser push via Supabase Realtime/SSE/WebSockets.
+- **Lifecycle AI agents** — pre-arrival, on-stay, and post-stay AI workflows with stage-scoped tool calling, deterministic intent guardrails, clarify-once handling, truthful staff handoff, and observability logs.
+- **Menu & facilities service catalog** — Operations-area tenant configuration for room-service food/drinks, facilities, services, availability, prices, aliases, and preparation-minute estimates that on-stay AI uses before answering menu questions or creating validated room-service orders.
+- **Operations dashboard** — staff-facing dashboards with database-backed updates, active Human Handoffs, selected-chat WAHA refresh, manual staff replies, and room for future browser push via Supabase Realtime/SSE/WebSockets.
 - **Feedback workflow** — post-stay feedback forms, feedback monitor dashboard, 24-hour escalation, and AI follow-up handoff.
 - **Configurable AI assistant** — hotel name, AI name, tone of voice, and custom instructions injected into runtime prompts.
 - **Multilingual templates** — template triggers and variants support localized guest messaging.
@@ -90,6 +91,7 @@ Supabase PostgreSQL
     ├── guests / reservations
     ├── inbound_events / automation_jobs / message_logs
     ├── message_templates / message_template_variants
+    ├── service_catalog_categories / service_catalog_items / service_catalog_item_aliases
     ├── lifecycle_ai_sessions / feedback records
     └── housekeeping_requests / room_service_orders / arrival_requests
     │
@@ -110,7 +112,7 @@ WAHA WhatsApp API
     └── inbound reply webhook back to Next.js
 ```
 
-**Core pattern:** inbound events are normalized, deduplicated, and written to Supabase. PMS webhook events are the primary source for reservation changes; pull sync is reserved for reconciliation and recovery. Automation jobs are claimed asynchronously, rendered from templates, sent through WAHA, and logged for observability. AI agents can create operational rows that are shown in realtime staff dashboards.
+**Core pattern:** inbound events are normalized, deduplicated, and written to Supabase. PMS webhook events are the primary source for reservation changes; pull sync is reserved for reconciliation and recovery. Automation jobs are claimed asynchronously, rendered from templates, sent through WAHA, and logged for observability. AI agents can create operational rows that are shown in realtime staff dashboards. The on-stay AI reads the tenant service catalog before answering room-service or facilities questions, only creates room-service orders from active, available catalog items, and includes preparation-time estimates when catalog `preparation_minutes` data exists.
 
 Lifecycle send guardrails: a reservation must not receive the same successful lifecycle trigger twice. The status-trigger worker checks prior `message_logs` rows with `status = sent` for the same reservation and trigger before calling WAHA. Realtime QloApps `on-stay` automation is enqueueable only on a true status transition into `on-stay`; other reservation field changes while already `on-stay` must not create another `on-stay` send.
 
@@ -179,10 +181,12 @@ Create a local environment file and provide the values used by your deployment.
 | PMS webhook           | `PMS_WEBHOOK_SECRET`                                                                                                                                            |
 | PMS reconciliation    | `PMS_RECONCILIATION_ENABLED`, `PMS_RECONCILIATION_CRON_SECRET`, `CRON_SECRET`                                                                                   |
 | Automation dev worker | `DEV_AUTOMATION_SYNC_ENABLED`, `DEV_AUTOMATION_SYNC_INTERVAL_MS`                                                                                                |
-| AI                    | `GEMINI_API_KEY`, `GEMINI_MODEL`                                                                                                                                |
+| AI                    | `AI_PROVIDER`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GEMINI_MODEL`, `NINEROUTER_URL`, `NINEROUTER_BASE_URL`, `NINEROUTER_KEY`, `NINEROUTER_API_KEY`, `NINEROUTER_MODEL` |
 | Debugging             | `LIFECYCLE_AI_DEBUG`                                                                                                                                            |
 
-Local development is standardized in the documentation around `GEMINI_MODEL=gemini-2.5-flash` for lifecycle tool-calling consistency.
+Local development defaults to `AI_PROVIDER=gemini` with `GEMINI_MODEL=gemini-2.5-flash` for lifecycle tool-calling consistency. Set either `GEMINI_API_KEY` or the AI SDK-compatible `GOOGLE_GENERATIVE_AI_API_KEY` for Gemini.
+
+To route lifecycle AI through 9Router, run 9Router, set `AI_PROVIDER=9router`, configure `NINEROUTER_URL` or `NINEROUTER_BASE_URL` (default `http://localhost:20128`; `/v1` is appended automatically when omitted), set `NINEROUTER_KEY` or `NINEROUTER_API_KEY` only if API-key auth is enabled, and choose a `NINEROUTER_MODEL` returned by `curl $NINEROUTER_URL/v1/models`. The 9Router path uses the OpenAI-compatible AI SDK provider from `@ai-sdk/openai-compatible`.
 
 For QloApps webhook integration, `PMS_WEBHOOK_SECRET` must exactly match the `Shared Secret` configured in the QloApps module that calls `/api/webhooks/pms`.
 
@@ -223,7 +227,7 @@ Open `http://localhost:3000` and follow the flow:
 1. Sign up with email and password.
 2. Log in.
 3. Choose owner onboarding and create your workspace.
-4. Configure PMS, WAHA, templates, team, and AI settings from the dashboard.
+4. Configure PMS, WAHA, templates, team, AI settings, and Menu & Facilities service catalog from the dashboard.
 
 ## QloApps Module Installation
 
@@ -273,6 +277,7 @@ The platform uses Supabase PostgreSQL with RLS enabled across access-scoped tabl
 | User access      | `tenant_users`, `invitations`                                                                |
 | Integrations     | `pms_configurations`, `waha_configurations`, `ai_settings`                                   |
 | Hotel operations | `guests`, `reservations`, `housekeeping_requests`, `room_service_orders`, `arrival_requests` |
+| Service catalog  | `service_catalog_categories`, `service_catalog_items`, `service_catalog_item_aliases`        |
 | Messaging        | `message_templates`, `message_template_variants`, `message_logs`                             |
 | Automation       | `inbound_events`, `automation_jobs`, lifecycle session tables                                |
 | Feedback         | reservation feedback fields, feedback tokens/forms, escalation state                         |
@@ -292,6 +297,7 @@ Important database practices:
 - Enable `LIFECYCLE_AI_DEBUG=true` only during focused AI routing or tool-calling triage.
 - WAHA webhook duplication can happen when both global and session webhooks are configured with overlapping events; current guardrails normalize events and skip redundant registration when a global webhook is already present.
 - The Operations dashboard shows active AI-generated operational rows; completed, resolved, or cancelled rows remain in the database for audit/history.
+- Owners configure Menu & Facilities from Operations (`/settings/service-catalog`); on-stay AI must use active service catalog rows for room-service and facility answers instead of inventing menu items, prices, hours, availability, or preparation-time estimates.
 - The manual WhatsApp inbox reads all chats directly from WAHA through authenticated Next.js proxy routes, refreshes only when staff click refresh/open/select/send, and does not persist all WhatsApp chats to Supabase.
 - WAHA chat history availability depends on the selected WAHA engine and store configuration. The recommended runtime for stable inbox history is `WHATSAPP_DEFAULT_ENGINE=NOWEB` with `WAHA_NOWEB_STORE_ENABLED=true` before scanning a fresh session QR.
 - If migrating an existing local WAHA session from `WEBJS` to `NOWEB`, back up the old session folder, use the `.waha_sessions` volume, start WAHA, reconnect the `default` session, and scan QR again so NOWEB store can initialize cleanly.

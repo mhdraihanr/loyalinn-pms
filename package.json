@@ -12,7 +12,8 @@
     "package:qloapps-module": "node scripts/package-qloapps-module.mjs"
   },
   "dependencies": {
-    "@ai-sdk/google": "^3.0.64",
+    "@ai-sdk/google": "^3.0.101",
+    "@ai-sdk/openai-compatible": "^2.0.62",
     "@mantine/core": "^8.3.15",
     "@mantine/dates": "^8.3.16",
     "@mantine/form": "^8.3.15",
@@ -22,7 +23,7 @@
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.95.3",
     "@tabler/icons-react": "^3.36.1",
-    "ai": "^6.0.156",
+    "ai": "^6.0.235",
     "axios": "^1.13.6",
     "dayjs": "^1.11.20",
     "next": "16.1.6",

@@ -185,28 +185,29 @@ requestId:"abc-123" AND level:"error"
 - Pastikan runtime sudah memakai guard terbaru: realtime `on-stay` hanya enqueue pada transisi ke `on-stay`, dan worker mengecek existence log `sent` dengan query limit, bukan asumsi satu row.
 - Untuk data historis yang sudah terlanjur duplicate, jangan hapus semua log `sent`; keberadaan minimal satu log `sent` diperlukan sebagai bukti pengiriman sukses.
 
-### WAHA Inbound AI 500 (Gemini Provider Misconfiguration)
+### WAHA Inbound AI 500 (AI Provider Misconfiguration)
 
 **Symptoms:**
 
-- `POST /api/webhooks/waha` returns `500`
-- Logs show `AI_APICallError` with provider failure details
-- Provider response shows `statusCode: 400/401` from Gemini API endpoint
+- `POST /api/webhooks/waha` returns `500`.
+- Logs show `AI_APICallError` with provider failure details.
+- Provider response shows `statusCode: 400/401` from the selected Gemini or 9Router/OpenAI-compatible endpoint.
 
 **Actions:**
 
-1. Verify AI provider call in `lib/ai/agent.ts` uses `aiProvider(AI_MODEL)`.
-2. Confirm `GEMINI_API_KEY` is set and valid in `.env.local`.
-3. Confirm `GEMINI_MODEL` has no inline comments or trailing invalid characters in `.env.local`.
-4. Temporarily set `AI_FEEDBACK_DEBUG=true` to inspect tool-calling step logs.
-5. Re-test with one reservation in `post_stay_feedback_status='ai_followup'` and a valid inbound WAHA payload.
+1. Verify AI provider calls in lifecycle agents use `aiProvider(AI_MODEL)`.
+2. Confirm `AI_PROVIDER` is either `gemini` or `9router` (`ninerouter` alias is accepted).
+3. For Gemini mode, confirm `GEMINI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY` is set and `GEMINI_MODEL` has no inline comments or trailing invalid characters.
+4. For 9Router mode, confirm `NINEROUTER_URL` or `NINEROUTER_BASE_URL` reaches the local gateway, `NINEROUTER_KEY` or `NINEROUTER_API_KEY` is set only when auth is enabled, and `NINEROUTER_MODEL` exists in `curl $NINEROUTER_URL/v1/models`.
+5. Temporarily set `AI_FEEDBACK_DEBUG=true` or `LIFECYCLE_AI_DEBUG=true` to inspect provider name, model id, and tool-calling step logs.
+6. Re-test with one reservation in `post_stay_feedback_status='ai_followup'` and a valid inbound WAHA payload.
 
 **Recovery:**
 
-- Restart service after deploying the provider-path fix.
+- Restart service after changing provider env values.
 - Re-send webhook payload and verify route returns `200`.
 - Confirm `message_logs` stores both inbound `received` and outbound `sent` rows for the reservation.
-- If still failing, switch to another Gemini model with reliable tool-calling support and re-test.
+- If still failing, switch to another Gemini or 9Router model with reliable tool-calling support and re-test.
 
 ### WAHA Inbound AI 500 (Provider Rate-Limit / 429)
 
@@ -228,6 +229,80 @@ requestId:"abc-123" AND level:"error"
 
 - Sistem kini memakai fallback otomatis untuk error AI provider retryable (termasuk 429), sehingga webhook tetap `200` dan tamu menerima pesan bahwa tim hotel akan follow-up manual.
 - Jika 429 sering berulang, pindah ke model Gemini yang lebih stabil atau tingkatkan kuota billing API key.
+
+### Lifecycle Intent Guard and Handoff Triage
+
+**Symptoms:**
+
+- Guest receives a clarification or boundary/handoff reply instead of a generic AI confirmation.
+- A request appears not to create a housekeeping, room-service, or arrival row.
+- Staff need to identify lifecycle conversations that require manual review.
+
+**Actions:**
+
+1. Confirm the reservation lifecycle stage (`pre-arrival`, `on-stay`, or checked-out post-stay) and inspect inbound/outbound `message_logs`.
+2. Check `lifecycle_ai_sessions` for `session_status`, `clarification_count`, `last_action_type`, and `last_action_payload`.
+3. A first short/ambiguous message should produce `intent_guard_clarify`; the next ambiguous message should produce `intent_guard_handoff`.
+4. A guard handoff deliberately creates no operational request row. It means the automated agent stopped because the request requires staff judgement or does not match the lifecycle stage.
+5. For urgent safety, security, or medical messages, instruct the guest to contact the front desk or nearby staff immediately; do not attempt to resolve the issue through automation.
+
+**Recovery:**
+
+- Review handoff sessions with `needs_human_follow_up = true` and `session_status = 'handoff'`.
+- Do not reset a handoff session to `active` merely to restart automation; resolve the guest issue first.
+- See [Lifecycle Intent Guard](./lifecycle-intent-guard.md) for the scope matrix, SQL triage query, and smoke scenarios.
+
+### Human Handoffs Chat Drawer
+
+**Symptoms:**
+
+- The Human Handoffs tab has active rows but the selected chat cannot refresh.
+- The drawer shows a database transcript fallback warning.
+- Manual WhatsApp send fails or reports that another operator changed the handoff.
+
+**Actions:**
+
+1. Open `Operations → Human Handoffs` and select the target row.
+2. Use **Refresh chat terpilih**; this refreshes only the selected WAHA chat, never the global WAHA inbox.
+3. If refresh fails, review the database transcript and check WAHA connection status in Settings → WAHA.
+4. Confirm `lifecycle_ai_sessions` stores `waha_session_name`, `waha_chat_id`, phone/LID fallback fields, and a non-stale `handoff_version`.
+5. If a manual send/resolve reports a conflict, refresh the drawer because another operator may have changed or resolved the handoff.
+6. Do not mark a handoff resolved merely because a manual message was sent; resolve only after staff work is complete.
+
+**Recovery:**
+
+- The database transcript in `message_logs` remains available when WAHA is unavailable.
+- For older handoffs without persisted WAHA chat identity, the server falls back to the guest phone; LID-specific history may require a new inbound webhook to establish the original mapping.
+- See [Human Handoffs Operations](./human-handoffs-operations.md) for the full staff workflow and SQL triage query.
+
+### Menu & Facilities Catalog Not Used by On-Stay AI
+
+**Symptoms:**
+
+- Guest asks "menu apa aja?" but AI says no catalog is available or gives a handoff reply.
+- Guest asks for a configured item, but no `room_service_orders` row is created.
+- AI refuses to order an item that staff expects to be available.
+- Staff do not see a room-service order in Operations after a guest placed a food/drink request.
+
+**Actions:**
+
+1. Open Operations → Menu & Facilities (`/settings/service-catalog`) as an owner and confirm the item exists.
+2. Verify the category and item are both active (`is_active = true`).
+3. Verify food/drink items have `preparation_minutes` set when guests should receive a preparation-time estimate.
+4. Verify the item is configured with `fulfillment_type = 'room_service'` for food/drink orders.
+5. Verify `availability_status` is `available` or `limited`; `unavailable` and `by_request` items are deliberately not orderable by AI.
+6. Check aliases for common guest phrases (for example `nasgor`, `teh es`, `kolam`) so `search_service_catalog` can match natural-language requests.
+7. Confirm the reservation is in lifecycle stage `on-stay`; pre-arrival and post-stay agents must not create room-service orders.
+8. Check `lifecycle_ai_sessions.last_action_type` and `last_action_payload`; catalog validation failures return a system info message and should not insert operational rows.
+9. Check `message_logs` for the inbound guest request and outbound AI reply.
+
+**Recovery:**
+
+- Add or correct the service catalog item, aliases, availability, `preparation_minutes`, and fulfillment type, then ask the guest to confirm the order again.
+- If the item requires staff judgement, keep `availability_status = 'by_request'` and let AI hand off instead of auto-ordering.
+- If the guest request is ambiguous, AI should clarify once before ordering; do not bypass this by inserting unvalidated free-text orders.
+- Run focused tests after catalog/tool changes:
+  - `pnpm test tests/unit/supabase/service-catalog-schema.test.ts tests/unit/lib/ai/on-stay-service-catalog-tools.test.ts`
 
 ### AI Settings Not Applied to Replies
 

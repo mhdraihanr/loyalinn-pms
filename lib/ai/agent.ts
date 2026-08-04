@@ -1,5 +1,6 @@
 import { generateText, stepCountIs, tool, type ModelMessage } from "ai";
 import { z } from "zod";
+import { normalizeWhatsAppMarkdown } from "@/lib/ai/fallback-reply";
 import {
   aiProvider,
   AI_MODEL,
@@ -226,7 +227,10 @@ AI rules:
 - If the guest sends comments first without rating, ask only for the numeric rating.
 - Once numeric rating is available, combine it with the latest comment context and call \`update_guest_feedback\`.
 - If the guest refuses to provide feedback or asks to stop follow-up, call the \`ignore_feedback\` tool.
-- After a successful tool call, end the conversation with a brief thank-you message.${optionalBlock}`;
+- Do not handle operational requests, refunds, policy exceptions, or booking changes; those require staff review.
+- Never promise compensation, approval, or an action that has not been recorded.
+- After a successful tool call, end the conversation with a brief thank-you message.
+- WhatsApp formatting: use single asterisks for emphasis, for example *rating 1-5*. Do not use Markdown double-asterisk bold like **rating 1-5**.${optionalBlock}`;
   }
 
   return `Anda adalah ${resolvedAiName}, resepsionis dan Guest Relation AI untuk hotel "${resolvedHotelName}".
@@ -242,7 +246,10 @@ Aturan AI:
 - Jika tamu mengirim komentar dulu tanpa rating, minta rating angkanya secara singkat.
 - Jika rating angka sudah tersedia, gabungkan dengan komentar terbaru dari konteks percakapan lalu panggil tool \`update_guest_feedback\`.
 - Khusus jika pengguna menolak memberikan feedback atau marah (menolak untuk di-follow up), gunakan tool \`ignore_feedback\` agar sistem berhenti mengganggu tamu.
-- Jika tool sudah berhasil dipanggil (berhasil mencatat feedback), akhiri percakapan dengan mengucapkan terima kasih atas waktunya.${optionalBlock}`;
+- Jangan tangani permintaan operasional, refund, pengecualian kebijakan, atau perubahan booking; hal tersebut memerlukan peninjauan staf.
+- Jangan pernah menjanjikan kompensasi, persetujuan, atau tindakan yang belum berhasil dicatat.
+- Jika tool sudah berhasil dipanggil (berhasil mencatat feedback), akhiri percakapan dengan mengucapkan terima kasih atas waktunya.
+- Format WhatsApp: gunakan satu tanda bintang untuk penekanan, contoh *rating 1-5*. Jangan gunakan format Markdown bold dua bintang seperti **rating 1-5**.${optionalBlock}`;
 }
 
 export function buildPostStayCompletionHandoffSystemPrompt({
@@ -358,7 +365,7 @@ export async function generatePostStayCompletionHandoffReply(
   }
 
   return {
-    response: result.text,
+    response: normalizeWhatsAppMarkdown(result.text),
   };
 }
 
@@ -565,6 +572,6 @@ export async function processPostStayLifecycleConversation(
   }
 
   return {
-    response: result.text,
+    response: normalizeWhatsAppMarkdown(result.text),
   };
 }

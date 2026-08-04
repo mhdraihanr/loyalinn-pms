@@ -5,13 +5,14 @@ import type { ModelMessage } from "ai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseDirectPostStayFeedback } from "@/lib/automation/post-stay-feedback-parser";
 import { completePostStayFeedbackWithReward } from "@/lib/automation/feedback-reward";
-import { generatePostStayCompletionHandoffReply } from "@/lib/ai/agent";
 import {
   buildBudgetedMessageHistory,
   buildTrimmedConversationSummary,
 } from "@/lib/ai/context-budget";
 import { processLifecycleGuestMessage } from "@/lib/ai/lifecycle-agent";
+import { evaluateLifecycleIntentGuard } from "@/lib/ai/lifecycle-intent-guard";
 import {
+  getLifecycleAiSessionState,
   type LifecycleLanguage,
   type LifecycleStage,
   upsertLifecycleAiSession,
@@ -33,8 +34,13 @@ const RESERVATION_LOOKUP_SELECT = `
 const SUPPORTED_HMAC_ALGORITHMS = new Set(["sha256", "sha512"]);
 
 const AI_PROVIDER_FAILURE_REPLY_TEMPLATES: Record<LifecycleLanguage, string> = {
-  id: "Terima kasih {{guestName}}, pesan Anda sudah kami terima. Saat ini asisten otomatis kami sedang sangat sibuk. Tim {{hotelName}} akan menindaklanjuti Anda secara manual sesegera mungkin.",
-  en: "Thank you {{guestName}}, we received your message. Our automated assistant is currently overloaded. The {{hotelName}} team will follow up with you manually as soon as possible.",
+  id: "Asisten otomatis sedang tidak tersedia. Pesan ini memerlukan peninjauan staf hotel dan tidak akan ditangani secara otomatis. Mohon tunggu balasan dari staf hotel.",
+  en: "The automated assistant is currently unavailable. This message needs hotel staff review and will not be handled automatically. Please wait for a reply from hotel staff.",
+};
+
+const COMPLETED_POST_STAY_HANDOFF_REPLIES: Record<LifecycleLanguage, string> = {
+  id: "Feedback Anda sudah tercatat. Pesan lanjutan ini memerlukan peninjauan staf hotel dan tidak akan ditangani secara otomatis. Mohon tunggu balasan dari staf hotel.",
+  en: "Your feedback has already been recorded. This follow-up message needs hotel staff review and will not be handled automatically. Please wait for a reply from hotel staff.",
 };
 
 const POST_STAY_ELIGIBLE_FEEDBACK_STATUSES = new Set([
@@ -942,6 +948,11 @@ export async function POST(req: NextRequest) {
         status: "received",
         trigger_type: triggerType,
         provider_message_id: providerMessageId,
+        provider_session_name: session,
+        provider_chat_id: chatId,
+        provider_phone_chat_id: resolvedPhoneChatId || null,
+        provider_lid: isLidChatId(chatId) ? chatId : null,
+        source: "waha_webhook",
         sent_at: new Date(
           Number(message.timestamp ?? Date.now() / 1000) * 1000,
         ).toISOString(),
@@ -1047,6 +1058,7 @@ export async function POST(req: NextRequest) {
       });
 
       await wahaClient.sendMessage(session, chatId, replyText);
+      const sentAt = new Date().toISOString();
       await supabase.from("message_logs").insert({
         tenant_id: reservation.tenant_id,
         reservation_id: reservation.id,
@@ -1055,7 +1067,13 @@ export async function POST(req: NextRequest) {
         content: replyText,
         direction: "outbound",
         status: "sent",
+        sent_at: sentAt,
         trigger_type: triggerType,
+        provider_session_name: session,
+        provider_chat_id: chatId,
+        provider_phone_chat_id: resolvedPhoneChatId || null,
+        provider_lid: isLidChatId(chatId) ? chatId : null,
+        source: "automation",
       });
 
       await upsertLifecycleAiSession(supabase, {
@@ -1063,7 +1081,11 @@ export async function POST(req: NextRequest) {
         reservationId: reservation.id,
         guestId: reservation.guest_id,
         stage: lifecycleStage,
-        sessionStatus: "handoff",
+        wahaSessionName: session,
+        wahaChatId: chatId,
+        wahaPhoneChatId: resolvedPhoneChatId || null,
+        wahaLid: isLidChatId(chatId) ? chatId : null,
+        sessionStatus: "resolved",
         needsHumanFollowUp: false,
         lastActionType: DIRECT_POST_STAY_FEEDBACK_ACTION,
         lastActionPayload: {
@@ -1124,6 +1146,10 @@ export async function POST(req: NextRequest) {
           reservationId: reservation.id,
           guestId: reservation.guest_id,
           stage: lifecycleStage,
+          wahaSessionName: session,
+          wahaChatId: chatId,
+          wahaPhoneChatId: resolvedPhoneChatId || null,
+          wahaLid: isLidChatId(chatId) ? chatId : null,
           sessionStatus: "handoff",
           needsHumanFollowUp: true,
           lastActionType: COMPLETED_POST_STAY_HANDOFF_ACTION,
@@ -1136,52 +1162,12 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      let handoffReply = "";
-      let fallbackUsed = false;
-
-      try {
-        const aiResponse = await generatePostStayCompletionHandoffReply({
-          reservationId: reservation.id,
-          tenantId: reservation.tenant_id,
-          guestName,
-          hotelName,
-          messageHistory,
-          preferredLanguage,
-        });
-
-        handoffReply = aiResponse.response.trim();
-      } catch (error: unknown) {
-        if (!isRetryableAiProviderError(error)) {
-          throw error;
-        }
-
-        fallbackUsed = true;
-        handoffReply = resolveAiProviderFailureReply({
-          guestName,
-          hotelName,
-          preferredLanguage,
-        });
-
-        const detail = error instanceof Error ? error.message : String(error);
-        console.warn(
-          "WAHA completed post-stay handoff AI retryable provider error, sending fallback reply",
-          {
-            reservationId: reservation.id,
-            tenantId: reservation.tenant_id,
-            detail,
-          },
-        );
-      }
-
-      const replyText = handoffReply.trim();
-
-      if (!replyText) {
-        throw new Error(
-          "Completed post-stay handoff reply is empty and cannot be sent",
-        );
-      }
+      const replyText =
+        COMPLETED_POST_STAY_HANDOFF_REPLIES[preferredLanguage];
+      const fallbackUsed = false;
 
       await wahaClient.sendMessage(session, chatId, replyText);
+      const sentAt = new Date().toISOString();
       await supabase.from("message_logs").insert({
         tenant_id: reservation.tenant_id,
         reservation_id: reservation.id,
@@ -1190,7 +1176,13 @@ export async function POST(req: NextRequest) {
         content: replyText,
         direction: "outbound",
         status: "sent",
+        sent_at: sentAt,
         trigger_type: triggerType,
+        provider_session_name: session,
+        provider_chat_id: chatId,
+        provider_phone_chat_id: resolvedPhoneChatId || null,
+        provider_lid: isLidChatId(chatId) ? chatId : null,
+        source: "ai",
       });
 
       await upsertLifecycleAiSession(supabase, {
@@ -1198,6 +1190,10 @@ export async function POST(req: NextRequest) {
         reservationId: reservation.id,
         guestId: reservation.guest_id,
         stage: lifecycleStage,
+        wahaSessionName: session,
+        wahaChatId: chatId,
+        wahaPhoneChatId: resolvedPhoneChatId || null,
+        wahaLid: isLidChatId(chatId) ? chatId : null,
         sessionStatus: "handoff",
         needsHumanFollowUp: true,
         lastActionType: COMPLETED_POST_STAY_HANDOFF_ACTION,
@@ -1224,12 +1220,135 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const lifecycleSession = await getLifecycleAiSessionState(supabase, {
+      tenantId: reservation.tenant_id,
+      reservationId: reservation.id,
+      stage: lifecycleStage,
+    });
+
+    if (lifecycleSession?.sessionStatus === "handoff") {
+      await upsertLifecycleAiSession(supabase, {
+        tenantId: reservation.tenant_id,
+        reservationId: reservation.id,
+        guestId: reservation.guest_id,
+        stage: lifecycleStage,
+        wahaSessionName: session,
+        wahaChatId: chatId,
+        wahaPhoneChatId: resolvedPhoneChatId || null,
+        wahaLid: isLidChatId(chatId) ? chatId : null,
+        sessionStatus: "handoff",
+        touchInboundAt: true,
+      });
+
+      return NextResponse.json({
+        status: "ignored: lifecycle session handoff",
+      });
+    }
+
+    // A human-resolved handoff may safely re-enter automation on a new guest message.
+    // The active-session upsert below reopens the lifecycle agent for this turn.
+
+    const intentGuard = evaluateLifecycleIntentGuard({
+      stage: lifecycleStage,
+      text: body,
+      language: preferredLanguage,
+      clarificationCount: lifecycleSession?.clarificationCount ?? 0,
+    });
+
+    if (intentGuard.outcome !== "allow") {
+      if (
+        intentGuard.outcome === "resolved" &&
+        lifecycleStage === "post-stay" &&
+        (reservation.post_stay_feedback_status === "pending" ||
+          reservation.post_stay_feedback_status === "ai_followup")
+      ) {
+        const { error: ignoreError } = await supabase
+          .from("reservations")
+          .update({ post_stay_feedback_status: "ignored" })
+          .eq("id", reservation.id)
+          .eq("tenant_id", reservation.tenant_id)
+          .in("post_stay_feedback_status", ["pending", "ai_followup"]);
+
+        if (ignoreError) {
+          throw new Error(ignoreError.message || "Failed to ignore post-stay feedback");
+        }
+      }
+
+      const replyText = intentGuard.reply;
+      if (replyText) {
+        await wahaClient.sendMessage(session, chatId, replyText);
+        const sentAt = new Date().toISOString();
+        await supabase.from("message_logs").insert({
+          tenant_id: reservation.tenant_id,
+          reservation_id: reservation.id,
+          guest_id: reservation.guest_id,
+          phone,
+          content: replyText,
+          direction: "outbound",
+          status: "sent",
+          sent_at: sentAt,
+          trigger_type: triggerType,
+          provider_session_name: session,
+          provider_chat_id: chatId,
+          provider_phone_chat_id: resolvedPhoneChatId || null,
+          provider_lid: isLidChatId(chatId) ? chatId : null,
+          source: "ai",
+        });
+      }
+
+      const nextClarificationCount =
+        intentGuard.outcome === "clarify"
+          ? (lifecycleSession?.clarificationCount ?? 0) + 1
+          : lifecycleSession?.clarificationCount ?? 0;
+      const sessionStatus =
+        intentGuard.outcome === "handoff"
+          ? "handoff"
+          : intentGuard.outcome === "resolved"
+            ? "resolved"
+            : "active";
+
+      await upsertLifecycleAiSession(supabase, {
+        tenantId: reservation.tenant_id,
+        reservationId: reservation.id,
+        guestId: reservation.guest_id,
+        stage: lifecycleStage,
+        wahaSessionName: session,
+        wahaChatId: chatId,
+        wahaPhoneChatId: resolvedPhoneChatId || null,
+        wahaLid: isLidChatId(chatId) ? chatId : null,
+        sessionStatus,
+        needsHumanFollowUp: intentGuard.outcome === "handoff",
+        handoffPriority: intentGuard.priority,
+        handoffReason: intentGuard.outcome === "handoff" ? intentGuard.reason : null,
+        clarificationCount: nextClarificationCount,
+        lastActionType: `intent_guard_${intentGuard.outcome}`,
+        lastActionPayload: {
+          intent: intentGuard.intent,
+          reason: intentGuard.reason,
+          priority: intentGuard.priority,
+        },
+        touchInboundAt: true,
+        touchOutboundAt: Boolean(replyText),
+      });
+
+      return NextResponse.json({
+        status: `success:intent-guard:${intentGuard.outcome}`,
+        ai_reply: replyText,
+        handoff: intentGuard.outcome === "handoff",
+      });
+    }
+
     await upsertLifecycleAiSession(supabase, {
       tenantId: reservation.tenant_id,
       reservationId: reservation.id,
       guestId: reservation.guest_id,
       stage: lifecycleStage,
+      wahaSessionName: session,
+      wahaChatId: chatId,
+      wahaPhoneChatId: resolvedPhoneChatId || null,
+      wahaLid: isLidChatId(chatId) ? chatId : null,
       sessionStatus: "active",
+      clarificationCount: lifecycleSession?.clarificationCount ?? 0,
       touchInboundAt: true,
     });
 
@@ -1278,6 +1397,7 @@ export async function POST(req: NextRequest) {
       );
 
       await wahaClient.sendMessage(session, chatId, fallbackReply);
+      const sentAt = new Date().toISOString();
       await supabase.from("message_logs").insert({
         tenant_id: reservation.tenant_id,
         reservation_id: reservation.id,
@@ -1286,7 +1406,13 @@ export async function POST(req: NextRequest) {
         content: fallbackReply,
         direction: "outbound",
         status: "sent",
+        sent_at: sentAt,
         trigger_type: triggerType,
+        provider_session_name: session,
+        provider_chat_id: chatId,
+        provider_phone_chat_id: resolvedPhoneChatId || null,
+        provider_lid: isLidChatId(chatId) ? chatId : null,
+        source: "ai",
       });
 
       await upsertLifecycleAiSession(supabase, {
@@ -1294,8 +1420,14 @@ export async function POST(req: NextRequest) {
         reservationId: reservation.id,
         guestId: reservation.guest_id,
         stage: lifecycleStage,
+        wahaSessionName: session,
+        wahaChatId: chatId,
+        wahaPhoneChatId: resolvedPhoneChatId || null,
+        wahaLid: isLidChatId(chatId) ? chatId : null,
         sessionStatus: "handoff",
         needsHumanFollowUp: true,
+        handoffPriority: "normal",
+        handoffReason: "provider_unavailable",
         lastActionType: "provider_fallback_handoff",
         lastActionPayload: {
           detail,
@@ -1326,6 +1458,7 @@ export async function POST(req: NextRequest) {
       // Ambil session conf dari tenant ini if any, else use 'default'
       // Untuk limitasi MVP: 'default' session name digunakan.
       await wahaClient.sendMessage(session, chatId, replyText);
+      const sentAt = new Date().toISOString();
 
       // 7. Simpan balasan AI (outbound) ke message_logs
       await supabase.from("message_logs").insert({
@@ -1336,7 +1469,19 @@ export async function POST(req: NextRequest) {
         content: replyText,
         direction: "outbound",
         status: "sent",
+        sent_at: sentAt,
         trigger_type: triggerType,
+        provider_session_name: session,
+        provider_chat_id: chatId,
+        provider_phone_chat_id: resolvedPhoneChatId || null,
+        provider_lid: isLidChatId(chatId) ? chatId : null,
+        source: "ai",
+      });
+
+      const latestLifecycleSession = await getLifecycleAiSessionState(supabase, {
+        tenantId: reservation.tenant_id,
+        reservationId: reservation.id,
+        stage: lifecycleStage,
       });
 
       await upsertLifecycleAiSession(supabase, {
@@ -1344,7 +1489,12 @@ export async function POST(req: NextRequest) {
         reservationId: reservation.id,
         guestId: reservation.guest_id,
         stage: lifecycleStage,
-        sessionStatus: "active",
+        wahaSessionName: session,
+        wahaChatId: chatId,
+        wahaPhoneChatId: resolvedPhoneChatId || null,
+        wahaLid: isLidChatId(chatId) ? chatId : null,
+        sessionStatus: latestLifecycleSession?.sessionStatus ?? "active",
+        clarificationCount: latestLifecycleSession?.clarificationCount ?? 0,
         touchOutboundAt: true,
       });
     }

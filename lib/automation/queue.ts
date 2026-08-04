@@ -25,6 +25,76 @@ type RescheduleOptions = {
   errorMessage: string;
 };
 
+type AutomationAdminClient = ReturnType<typeof createAdminClient>;
+
+type EnqueueStatusTriggerAutomationJobInput = {
+  tenantId: string;
+  reservationId: string;
+  triggerType: "pre-arrival" | "on-stay" | "post-stay" | "cancelled";
+  payload: Record<string, unknown>;
+  adminClient?: AutomationAdminClient;
+};
+
+export async function enqueueStatusTriggerAutomationJobIfMissing({
+  tenantId,
+  reservationId,
+  triggerType,
+  payload,
+  adminClient = createAdminClient(),
+}: EnqueueStatusTriggerAutomationJobInput) {
+  const { data: existingJob, error: existingJobError } = await adminClient
+    .from("automation_jobs")
+    .select("id")
+    .eq("reservation_id", reservationId)
+    .eq("trigger_type", triggerType)
+    .maybeSingle();
+
+  if (existingJobError) {
+    const message = existingJobError.message ?? "";
+
+    if (/multiple rows|more than one row|json object requested/i.test(message)) {
+      return { enqueued: false, reason: "existing-job" as const };
+    }
+
+    throw new Error(message || "Failed to lookup existing automation job");
+  }
+
+  if (existingJob) {
+    return { enqueued: false, reason: "existing-job" as const };
+  }
+
+  const { data: sentLogs, error: sentLogError } = await adminClient
+    .from("message_logs")
+    .select("id")
+    .eq("reservation_id", reservationId)
+    .eq("trigger_type", triggerType)
+    .eq("status", "sent")
+    .limit(1);
+
+  if (sentLogError) {
+    throw new Error(sentLogError.message);
+  }
+
+  if (sentLogs?.length) {
+    return { enqueued: false, reason: "already-sent" as const };
+  }
+
+  const { error } = await adminClient.from("automation_jobs").insert({
+    tenant_id: tenantId,
+    reservation_id: reservationId,
+    job_type: "status-trigger",
+    trigger_type: triggerType,
+    status: "pending",
+    payload,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return { enqueued: true, reason: null };
+}
+
 async function updateAutomationJob(
   jobId: string,
   payload: Record<string, string | number | null>,

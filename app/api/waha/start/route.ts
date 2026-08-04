@@ -101,7 +101,7 @@ function hasEquivalentGlobalWebhook(target: WebhookTarget) {
   );
 }
 
-function buildWebhookConfig(): WahaSessionConfig {
+function buildWebhookConfig(): WahaSessionConfig & { webhooks: NonNullable<WahaSessionConfig["webhooks"]> } {
   const hmacKey =
     process.env.WAHA_WEBHOOK_SECRET?.trim() ||
     process.env.PMS_WEBHOOK_SECRET?.trim() ||

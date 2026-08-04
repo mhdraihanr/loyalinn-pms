@@ -29,6 +29,7 @@ type UpsertPmsReservationResult = {
   previousStatus?: string;
   nextStatus: string;
   changed: boolean;
+  statusChanged: boolean;
   skipped: boolean;
 };
 
@@ -180,6 +181,7 @@ export async function upsertPmsReservation({
       previousStatus: undefined,
       nextStatus: status,
       changed: false,
+      statusChanged: false,
       skipped: true,
     };
   }
@@ -197,6 +199,7 @@ export async function upsertPmsReservation({
       previousStatus: existing?.status,
       nextStatus: status,
       changed: false,
+      statusChanged: false,
       skipped: true,
     };
   }
@@ -209,6 +212,7 @@ export async function upsertPmsReservation({
     amount: reservation.amount ?? null,
     source: reservation.source ?? null,
   });
+  const statusChanged = Boolean(existing && existing.status !== status);
 
   const upsertedReservation = await upsertReservation({
     id: existing?.id,
@@ -225,6 +229,7 @@ export async function upsertPmsReservation({
     previousStatus: existing?.status,
     nextStatus: status,
     changed,
+    statusChanged,
     skipped: false,
   };
 }

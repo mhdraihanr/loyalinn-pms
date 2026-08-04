@@ -67,6 +67,8 @@ type WahaChatsOverviewOptions = {
 
 type WahaChatMessagesOptions = {
   limit?: number;
+  offset?: number;
+  downloadMedia?: boolean;
 };
 
 function encodePathSegment(value: string) {
@@ -143,11 +145,13 @@ export const wahaClient = {
     options: WahaChatMessagesOptions = {},
   ): Promise<WahaChatMessage[]> => {
     const limit = options.limit ?? 50;
+    const offset = options.offset ?? 0;
+    const downloadMedia = options.downloadMedia ?? false;
 
     return apiClient
       .get(
         `/api/${encodePathSegment(session)}/chats/${encodePathSegment(chatId)}/messages`,
-        { params: { limit } },
+        { params: { limit, offset, downloadMedia } },
       )
       .then((res) => res.data as WahaChatMessage[]);
   },
