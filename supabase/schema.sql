@@ -127,6 +127,8 @@ CREATE TABLE room_service_orders (
   room_number TEXT NOT NULL,
   items JSONB NOT NULL,
   total_amount DECIMAL(10, 2),
+  currency TEXT NOT NULL DEFAULT 'IDR',
+  source_catalog_item_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in-progress', 'completed', 'cancelled')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -164,6 +166,72 @@ CREATE TABLE arrival_requests (
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in-progress', 'resolved', 'cancelled')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- SERVICE CATALOG CATEGORIES
+-- ============================================================
+CREATE TABLE service_catalog_categories (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('room_service', 'facility')),
+  name TEXT NOT NULL,
+  description TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(id, tenant_id),
+  UNIQUE(tenant_id, type, name)
+);
+
+-- ============================================================
+-- SERVICE CATALOG ITEMS
+-- ============================================================
+CREATE TABLE service_catalog_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  category_id UUID NOT NULL,
+  item_type TEXT NOT NULL CHECK (item_type IN ('food', 'drink', 'facility', 'service', 'amenity')),
+  name TEXT NOT NULL,
+  description TEXT,
+  price DECIMAL(10, 2),
+  currency TEXT NOT NULL DEFAULT 'IDR',
+  unit TEXT,
+  availability_status TEXT NOT NULL DEFAULT 'available' CHECK (availability_status IN ('available', 'unavailable', 'limited', 'by_request')),
+  available_start_time TIME,
+  available_end_time TIME,
+  location TEXT,
+  preparation_minutes INTEGER CHECK (preparation_minutes IS NULL OR preparation_minutes >= 0),
+  fulfillment_type TEXT NOT NULL DEFAULT 'info_only' CHECK (fulfillment_type IN ('room_service', 'housekeeping', 'front_office', 'concierge', 'info_only')),
+  guest_notes TEXT,
+  staff_notes TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(id, tenant_id),
+  UNIQUE(tenant_id, category_id, name),
+  CONSTRAINT service_catalog_items_category_tenant_fkey
+    FOREIGN KEY (category_id, tenant_id)
+    REFERENCES service_catalog_categories(id, tenant_id)
+    ON DELETE RESTRICT
+);
+
+-- ============================================================
+-- SERVICE CATALOG ITEM ALIASES
+-- ============================================================
+CREATE TABLE service_catalog_item_aliases (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  item_id UUID NOT NULL,
+  alias TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(tenant_id, item_id, alias),
+  CONSTRAINT service_catalog_item_aliases_item_tenant_fkey
+    FOREIGN KEY (item_id, tenant_id)
+    REFERENCES service_catalog_items(id, tenant_id)
+    ON DELETE CASCADE
 );
 
 -- ============================================================
@@ -212,6 +280,12 @@ CREATE TABLE message_logs (
   automation_job_id UUID,
   provider_message_id TEXT,
   provider_response JSONB,
+  provider_session_name TEXT,
+  provider_chat_id TEXT,
+  provider_phone_chat_id TEXT,
+  provider_lid TEXT,
+  source TEXT NOT NULL DEFAULT 'automation',
+  manual_actor_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   sent_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -243,6 +317,19 @@ CREATE TABLE lifecycle_ai_sessions (
   lifecycle_stage TEXT NOT NULL CHECK (lifecycle_stage IN ('pre-arrival', 'on-stay', 'post-stay')),
   session_status TEXT NOT NULL DEFAULT 'active' CHECK (session_status IN ('active', 'resolved', 'handoff')),
   needs_human_follow_up BOOLEAN NOT NULL DEFAULT FALSE,
+  clarification_count INTEGER NOT NULL DEFAULT 0 CHECK (clarification_count >= 0),
+  waha_session_name TEXT,
+  waha_chat_id TEXT,
+  waha_phone_chat_id TEXT,
+  waha_lid TEXT,
+  handoff_priority TEXT NOT NULL DEFAULT 'normal',
+  handoff_reason TEXT,
+  handoff_version BIGINT NOT NULL DEFAULT 0,
+  last_refreshed_at TIMESTAMPTZ,
+  last_refresh_error TEXT,
+  last_manual_reply_at TIMESTAMPTZ,
+  resolved_at TIMESTAMPTZ,
+  resolved_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   last_action_type TEXT,
   last_action_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
   last_inbound_message_at TIMESTAMPTZ,
@@ -401,6 +488,9 @@ ALTER TABLE reservations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE room_service_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE housekeeping_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE arrival_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE service_catalog_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE service_catalog_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE service_catalog_item_aliases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_template_variants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
@@ -500,6 +590,28 @@ CREATE POLICY "Members can manage arrival requests" ON arrival_requests
   FOR ALL USING (tenant_id = public.get_user_tenant_id())
   WITH CHECK (tenant_id = public.get_user_tenant_id());
 
+-- SERVICE CATALOG: members can view, only owners can manage
+CREATE POLICY "Members can view service catalog categories" ON service_catalog_categories
+  FOR SELECT USING (tenant_id = public.get_user_tenant_id());
+
+CREATE POLICY "Owners can manage service catalog categories" ON service_catalog_categories
+  FOR ALL USING (public.is_tenant_owner(tenant_id))
+  WITH CHECK (public.is_tenant_owner(tenant_id));
+
+CREATE POLICY "Members can view service catalog items" ON service_catalog_items
+  FOR SELECT USING (tenant_id = public.get_user_tenant_id());
+
+CREATE POLICY "Owners can manage service catalog items" ON service_catalog_items
+  FOR ALL USING (public.is_tenant_owner(tenant_id))
+  WITH CHECK (public.is_tenant_owner(tenant_id));
+
+CREATE POLICY "Members can view service catalog item aliases" ON service_catalog_item_aliases
+  FOR SELECT USING (tenant_id = public.get_user_tenant_id());
+
+CREATE POLICY "Owners can manage service catalog item aliases" ON service_catalog_item_aliases
+  FOR ALL USING (public.is_tenant_owner(tenant_id))
+  WITH CHECK (public.is_tenant_owner(tenant_id));
+
 -- MESSAGE TEMPLATES: all members can manage
 CREATE POLICY "Members can manage templates" ON message_templates
   FOR ALL USING (tenant_id = public.get_user_tenant_id());
@@ -553,6 +665,11 @@ CREATE INDEX idx_housekeeping_status ON housekeeping_requests(status);
 CREATE INDEX idx_arrival_requests_tenant_id ON arrival_requests(tenant_id);
 CREATE INDEX idx_arrival_requests_status ON arrival_requests(status);
 CREATE INDEX idx_arrival_requests_reservation_id ON arrival_requests(reservation_id);
+CREATE INDEX idx_service_catalog_categories_tenant_type ON service_catalog_categories(tenant_id, type, is_active, sort_order);
+CREATE INDEX idx_service_catalog_items_tenant_type ON service_catalog_items(tenant_id, item_type, is_active, availability_status, sort_order);
+CREATE INDEX idx_service_catalog_items_category ON service_catalog_items(category_id);
+CREATE INDEX idx_service_catalog_item_aliases_tenant_item ON service_catalog_item_aliases(tenant_id, item_id);
+CREATE UNIQUE INDEX idx_service_catalog_item_aliases_lower_unique ON service_catalog_item_aliases(tenant_id, item_id, lower(alias));
 CREATE INDEX idx_message_template_variants_template_id ON message_template_variants(template_id);
 CREATE INDEX idx_message_logs_tenant_id ON message_logs(tenant_id);
 CREATE INDEX idx_message_logs_trigger_type ON message_logs(trigger_type);

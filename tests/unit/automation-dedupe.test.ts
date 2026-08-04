@@ -26,28 +26,36 @@ describe("automation duplicate prevention", () => {
     expect(client.chain.limit).toHaveBeenCalledWith(1);
   });
 
-  it("only enqueues realtime on-stay automation for an actual status transition", () => {
+  it("only enqueues realtime lifecycle automation for an actual status transition", () => {
     expect(
       shouldEnqueueRealtimeStatusAutomation({
         status: "on-stay",
         previousStatus: "pre-arrival",
-        changed: true,
+        statusChanged: true,
       }),
     ).toBe(true);
 
     expect(
       shouldEnqueueRealtimeStatusAutomation({
-        status: "on-stay",
+        status: "checked-out",
         previousStatus: "on-stay",
-        changed: true,
+        statusChanged: true,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldEnqueueRealtimeStatusAutomation({
+        status: "checked-out",
+        previousStatus: "checked-out",
+        statusChanged: false,
       }),
     ).toBe(false);
 
     expect(
       shouldEnqueueRealtimeStatusAutomation({
-        status: "on-stay",
+        status: "checked-out",
         previousStatus: undefined,
-        changed: false,
+        statusChanged: false,
       }),
     ).toBe(false);
   });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionIcon,
   Alert,
@@ -167,11 +167,35 @@ export function WhatsappInboxButton() {
   const [loadingChats, setLoadingChats] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const messagesViewportRef = useRef<HTMLDivElement>(null);
 
   const selectedChat = useMemo(
     () => chats.find((chat) => getChatId(chat) === selectedChatId) ?? null,
     [chats, selectedChatId],
   );
+
+  const sortedMessages = useMemo(
+    () =>
+      [...messages].sort((left, right) => {
+        const leftTime = extractTimestamp(left.timestamp)?.getTime() ?? 0;
+        const rightTime = extractTimestamp(right.timestamp)?.getTime() ?? 0;
+        return leftTime - rightTime;
+      }),
+    [messages],
+  );
+
+  const latestMessageKey = sortedMessages.length
+    ? getMessageKey(sortedMessages[sortedMessages.length - 1], sortedMessages.length - 1)
+    : null;
+
+  const scrollToLatestMessage = useCallback((behavior: ScrollBehavior = "auto") => {
+    requestAnimationFrame(() => {
+      const viewport = messagesViewportRef.current;
+      if (!viewport) return;
+
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+    });
+  }, []);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -309,6 +333,11 @@ export function WhatsappInboxButton() {
       void refreshInbox();
     }
   }, [hasLoadedOnce, opened, refreshInbox]);
+
+  useEffect(() => {
+    if (!opened || !selectedChatId || loadingMessages) return;
+    scrollToLatestMessage("smooth");
+  }, [latestMessageKey, loadingMessages, opened, scrollToLatestMessage, selectedChatId]);
 
   const isConnected = status === "WORKING";
   const composerDisabled = !selectedChatId || !isConnected || sending;
@@ -453,14 +482,14 @@ export function WhatsappInboxButton() {
 
                     <Divider />
 
-                    <ScrollArea style={{ flex: 1 }}>
+                    <ScrollArea viewportRef={messagesViewportRef} offsetScrollbars style={{ flex: 1 }}>
                       <Stack gap="xs" pr="xs">
                         {loadingMessages && messages.length === 0 ? (
                           <Group justify="center" py="xl">
                             <Loader size="sm" />
                             <Text size="sm" c="dimmed">Loading messages...</Text>
                           </Group>
-                        ) : messages.length === 0 ? (
+                        ) : sortedMessages.length === 0 ? (
                           <Stack align="center" py="xl" gap="xs">
                             <ThemeIcon color="gray" variant="light" radius="xl" size={44}>
                               <IconMessageCircle size={22} />
@@ -471,7 +500,7 @@ export function WhatsappInboxButton() {
                             </Text>
                           </Stack>
                         ) : (
-                          messages.map((message, index) => {
+                          sortedMessages.map((message, index) => {
                             const outgoing = isFromMe(message);
                             const text = extractMessageText(message) || "Unsupported message content";
 

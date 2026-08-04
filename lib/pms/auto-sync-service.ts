@@ -1,8 +1,10 @@
 import { buildPayloadHash } from "@/lib/automation/idempotency";
+import { enqueueStatusTriggerAutomationJobIfMissing } from "@/lib/automation/queue";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 import type { PMSAdapter } from "./adapter";
 import { upsertPmsReservation } from "./reservation-upsert-service";
+import { resolveStatusAutomationTrigger } from "./status-automation";
 
 type AutoSyncInput = {
   tenantId: string;
@@ -18,12 +20,6 @@ type AutoSyncResult = {
   jobsEnqueued: number;
 };
 
-function shouldEnqueueImmediateAutomation(
-  previousStatus: string | undefined,
-  nextStatus: string,
-) {
-  return nextStatus === "on-stay" && previousStatus !== "on-stay";
-}
 
 async function insertInboundEvent(params: {
   tenantId: string;
@@ -38,8 +34,9 @@ async function insertInboundEvent(params: {
   amount: number | null;
   source: string | null;
   occurredAt: string;
+  adminClient?: ReturnType<typeof createAdminClient>;
 }) {
-  const adminClient = createAdminClient();
+  const adminClient = params.adminClient ?? createAdminClient();
   const idempotencyKey = buildPayloadHash(
     JSON.stringify({
       booking_id: params.bookingId,
@@ -93,35 +90,6 @@ async function insertInboundEvent(params: {
   return data as { id: string } | null;
 }
 
-async function enqueueImmediateAutomationJob(params: {
-  tenantId: string;
-  reservationId: string;
-  bookingId: string;
-  inboundEventId: string;
-  previousStatus?: string;
-  nextStatus: string;
-  occurredAt: string;
-}) {
-  const adminClient = createAdminClient();
-  const { error } = await adminClient.from("automation_jobs").insert({
-    tenant_id: params.tenantId,
-    reservation_id: params.reservationId,
-    job_type: "status-trigger",
-    trigger_type: params.nextStatus,
-    status: "pending",
-    payload: {
-      inbound_event_id: params.inboundEventId,
-      booking_id: params.bookingId,
-      status: params.nextStatus,
-      previous_status: params.previousStatus ?? null,
-      updated_at: params.occurredAt,
-    },
-  });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-}
 
 export async function runAutoSyncForTenant({
   tenantId,
@@ -162,6 +130,7 @@ export async function runAutoSyncForTenant({
     const eventType = upsertResult.previousStatus
       ? "reservation.updated"
       : "reservation.created";
+    const adminClient = createAdminClient();
     const inboundEvent = await insertInboundEvent({
       tenantId,
       reservationId: upsertResult.reservationId,
@@ -175,6 +144,7 @@ export async function runAutoSyncForTenant({
       amount: reservation.amount ?? null,
       source: reservation.source ?? null,
       occurredAt,
+      adminClient,
     });
 
     if (!inboundEvent) {
@@ -183,25 +153,33 @@ export async function runAutoSyncForTenant({
 
     eventsCreated += 1;
 
-    if (
-      !shouldEnqueueImmediateAutomation(
-        upsertResult.previousStatus,
-        upsertResult.nextStatus,
-      )
-    ) {
+    const triggerType = resolveStatusAutomationTrigger({
+      previousStatus: upsertResult.previousStatus,
+      nextStatus: upsertResult.nextStatus,
+      statusChanged: upsertResult.statusChanged,
+    });
+
+    if (!triggerType) {
       continue;
     }
 
-    await enqueueImmediateAutomationJob({
+    const enqueueResult = await enqueueStatusTriggerAutomationJobIfMissing({
       tenantId,
       reservationId: upsertResult.reservationId,
-      bookingId: reservation.pms_reservation_id,
-      inboundEventId: inboundEvent.id,
-      previousStatus: upsertResult.previousStatus,
-      nextStatus: upsertResult.nextStatus,
-      occurredAt,
+      triggerType,
+      payload: {
+        inbound_event_id: inboundEvent.id,
+        booking_id: reservation.pms_reservation_id,
+        status: upsertResult.nextStatus,
+        previous_status: upsertResult.previousStatus ?? null,
+        updated_at: occurredAt,
+      },
+      adminClient,
     });
-    jobsEnqueued += 1;
+
+    if (enqueueResult.enqueued) {
+      jobsEnqueued += 1;
+    }
   }
 
   return {

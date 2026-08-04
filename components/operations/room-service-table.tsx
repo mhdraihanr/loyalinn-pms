@@ -13,7 +13,8 @@ import {
   TextInput,
   ThemeIcon,
 } from "@mantine/core";
-import { IconSearch, IconToolsKitchen2 } from "@tabler/icons-react";
+import { IconMessageCircle, IconSearch, IconToolsKitchen2 } from "@tabler/icons-react";
+import { OperationChatDrawer } from "@/components/operations/operation-chat-drawer";
 import { createClient } from "@/lib/supabase/client";
 import { updateRoomServiceStatus } from "@/lib/actions/operations";
 import { useUserPreferences } from "@/components/settings/profile/use-user-preferences";
@@ -27,12 +28,14 @@ type RoomServiceItem = {
 
 export type RoomServiceOrder = {
   id: string;
+  reservation_id: string | null;
+  guest_id: string | null;
   room_number: string;
   items: RoomServiceItem[];
   total_amount: number;
   status: string;
   created_at: string;
-  guests: { name: string } | null;
+  guests: { name: string; phone: string | null } | null;
 };
 
 const statusColors: Record<string, string> = {
@@ -72,6 +75,7 @@ export function RoomServiceTable({
 }) {
   const [orders, setOrders] = useState<RoomServiceOrder[]>(initialData);
   const [query, setQuery] = useState("");
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const preferences = useUserPreferences();
   const supabase = createClient();
 
@@ -229,6 +233,14 @@ export function RoomServiceTable({
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs">
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      leftSection={<IconMessageCircle size={14} />}
+                      onClick={() => setSelectedOrderId(order.id)}
+                    >
+                      Detail
+                    </Button>
                     {order.status === "pending" && (
                       <Button
                         size="xs"
@@ -258,6 +270,12 @@ export function RoomServiceTable({
           </Table.Tbody>
         </Table>
       )}
+      <OperationChatDrawer
+        opened={Boolean(selectedOrderId)}
+        operationType="room-service"
+        operationId={selectedOrderId}
+        onClose={() => setSelectedOrderId(null)}
+      />
     </Stack>
   );
 }

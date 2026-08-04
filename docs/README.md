@@ -46,7 +46,11 @@ PMS Integration (MVP) phase documentation including:
 - **[Automation Worker Fixes & Tools (2026-04-09)](./phase-4/2026-04-09-automation-worker-fixes-and-tools.md)** - Reliability fixes, idempotency, and latest hardening notes.
 - **[AI Settings Design (2026-04-12)](./phase-4/2026-04-12-ai-settings-design.md)** - Final architecture for tenant-specific AI context injection.
 - **[AI Settings Implementation (2026-04-12)](./phase-4/2026-04-12-ai-settings-implementation.md)** - Execution record, delivered files, and verification summary.
+- **[AI Provider Configuration](./ai-provider-configuration.md)** - Gemini and 9Router environment switch, aliases, model selection, and local validation steps.
 - **[QloApps Integration](./qloapps-integration/README.md)** - Webhook-first runtime notes, including lifecycle status semantics and duplicate-safe `on-stay` automation guardrails.
+- **[Lifecycle Intent Guard](./lifecycle-intent-guard.md)** - Deterministic stage scope, clarify-once behavior, truthful handoff semantics, and lifecycle session triage.
+- **[Human Handoffs Operations](./human-handoffs-operations.md)** - Staff queue, selected-chat WAHA refresh, manual reply, resolve flow, and fallback transcript guidance.
+- **[Menu & Facilities Service Catalog](./service-catalog-menu-facilities.md)** - Operations-area room-service, facility, availability, price, alias, and preparation-minute data used by on-stay AI before answering guests or creating validated orders.
 
 ### 📁 plans/
 

@@ -1,5 +1,6 @@
-import { createAdminClient } from "@/lib/supabase/admin";
+import { enqueueStatusTriggerAutomationJobIfMissing } from "@/lib/automation/queue";
 import { escalatePendingFeedbackToAiFollowup } from "@/lib/automation/feedback-escalation";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 type SchedulerResult = {
   preArrivalEnqueued: number;
@@ -12,8 +13,23 @@ type ScheduledReservation = {
   tenant_id: string;
   pms_reservation_id: string | null;
   check_in_date?: string;
-  check_out_date?: string;
 };
+
+type PostStayRecoveryEvent = {
+  id: string;
+  tenant_id: string;
+  event_type: string;
+  source: string;
+  payload: {
+    reservation_id?: string;
+    booking_id?: string;
+    previous_status?: string | null;
+    status?: string;
+    occurred_at?: string | null;
+  };
+};
+
+const POST_STAY_RECOVERY_LOOKBACK_HOURS = 48;
 
 function toIsoDate(value: Date) {
   return value.toISOString().split("T")[0];
@@ -26,74 +42,30 @@ function addDays(baseTime: Date, days: number) {
   return next;
 }
 
-function isSchedulingWindowOpen(now: Date) {
-  return now.getUTCHours() >= 10;
+function isPostStayTransition(event: PostStayRecoveryEvent) {
+  return (
+    Boolean(event.payload.reservation_id) &&
+    Boolean(event.payload.booking_id) &&
+    Boolean(event.payload.previous_status) &&
+    event.payload.previous_status !== "checked-out" &&
+    event.payload.status === "checked-out"
+  );
 }
 
-async function enqueueIfMissing(
-  reservation: ScheduledReservation,
-  triggerType: "pre-arrival" | "post-stay",
-) {
-  const adminClient = createAdminClient();
-  const { data: existingJob, error: existingJobError } = await adminClient
-    .from("automation_jobs")
-    .select("id")
-    .eq("reservation_id", reservation.id)
-    .eq("trigger_type", triggerType)
-    .maybeSingle();
-
-  if (existingJobError) {
-    const message = existingJobError.message ?? "";
-
-    // maybeSingle expects at most one row.
-    // If historical duplicates already exist, treat it as "job exists" to avoid enqueue loops.
-    if (
-      /multiple rows|more than one row|json object requested/i.test(message)
-    ) {
-      return false;
-    }
-
-    throw new Error(message || "Failed to lookup existing automation job");
-  }
-
-  if (existingJob) {
-    return false;
-  }
-
-  const { error } = await adminClient.from("automation_jobs").insert({
-    tenant_id: reservation.tenant_id,
-    reservation_id: reservation.id,
-    job_type: "status-trigger",
-    trigger_type: triggerType,
-    status: "pending",
-    payload: {
-      booking_id: reservation.pms_reservation_id,
-      status: triggerType,
-    },
-  });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return true;
-}
+type SchedulerOptions = {
+  force?: boolean;
+  adminClient?: ReturnType<typeof createAdminClient>;
+  escalatePendingFeedback?: (now: Date) => Promise<number>;
+};
 
 export async function enqueueScheduledAutomationJobs(
   now = new Date(),
-  options: { force?: boolean } = {},
+  options: SchedulerOptions = {},
 ): Promise<SchedulerResult> {
-  const aiFollowupEscalated = await escalatePendingFeedbackToAiFollowup(now);
-
-  if (!options.force && !isSchedulingWindowOpen(now)) {
-    return {
-      preArrivalEnqueued: 0,
-      postStayEnqueued: 0,
-      aiFollowupEscalated,
-    };
-  }
-
-  const adminClient = createAdminClient();
+  const aiFollowupEscalated = await (
+    options.escalatePendingFeedback ?? escalatePendingFeedbackToAiFollowup
+  )(now);
+  const adminClient = options.adminClient ?? createAdminClient();
   const { data: preArrivalReservations, error: preArrivalError } =
     await adminClient
       .from("reservations")
@@ -104,38 +76,66 @@ export async function enqueueScheduledAutomationJobs(
     throw new Error(preArrivalError.message);
   }
 
-  const { data: postStayReservations, error: postStayError } = await adminClient
-    .from("reservations")
-    .select("id, tenant_id, pms_reservation_id, check_out_date")
-    .eq("status", "checked-out");
-
-  if (postStayError) {
-    throw new Error(postStayError.message);
-  }
-
   const expectedPreArrivalDate = toIsoDate(addDays(now, 1));
-  const expectedPostStayDate = toIsoDate(addDays(now, -1));
-
   let preArrivalEnqueued = 0;
+
   for (const reservation of (preArrivalReservations ??
     []) as ScheduledReservation[]) {
     if (reservation.check_in_date !== expectedPreArrivalDate) {
       continue;
     }
 
-    if (await enqueueIfMissing(reservation, "pre-arrival")) {
+    const result = await enqueueStatusTriggerAutomationJobIfMissing({
+      tenantId: reservation.tenant_id,
+      reservationId: reservation.id,
+      triggerType: "pre-arrival",
+      payload: {
+        booking_id: reservation.pms_reservation_id ?? "",
+        status: "pre-arrival",
+      },
+      adminClient,
+    });
+
+    if (result.enqueued) {
       preArrivalEnqueued += 1;
     }
   }
 
+  const recoverySince = new Date(
+    now.getTime() - POST_STAY_RECOVERY_LOOKBACK_HOURS * 60 * 60 * 1000,
+  ).toISOString();
+  const { data: recoveryEvents, error: recoveryError } = await adminClient
+    .from("inbound_events")
+    .select("id, tenant_id, event_type, source, payload")
+    .in("source", ["qloapps", "qloapps-poll"])
+    .gte("received_at", recoverySince);
+
+  if (recoveryError) {
+    throw new Error(recoveryError.message);
+  }
+
   let postStayEnqueued = 0;
-  for (const reservation of (postStayReservations ??
-    []) as ScheduledReservation[]) {
-    if (reservation.check_out_date !== expectedPostStayDate) {
+  for (const event of (recoveryEvents ?? []) as PostStayRecoveryEvent[]) {
+    if (!isPostStayTransition(event)) {
       continue;
     }
 
-    if (await enqueueIfMissing(reservation, "post-stay")) {
+    const result = await enqueueStatusTriggerAutomationJobIfMissing({
+      tenantId: event.tenant_id,
+      reservationId: event.payload.reservation_id as string,
+      triggerType: "post-stay",
+      payload: {
+        inbound_event_id: event.id,
+        event_type: event.event_type,
+        booking_id: event.payload.booking_id,
+        status: "checked-out",
+        previous_status: event.payload.previous_status ?? null,
+        updated_at: event.payload.occurred_at ?? null,
+      },
+      adminClient,
+    });
+
+    if (result.enqueued) {
       postStayEnqueued += 1;
     }
   }
