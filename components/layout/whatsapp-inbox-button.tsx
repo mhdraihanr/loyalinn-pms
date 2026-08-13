@@ -29,82 +29,41 @@ import {
   IconRefresh,
   IconSend,
 } from "@tabler/icons-react";
+import { createClient } from "@/lib/supabase/client";
+import type {
+  WhatsappConversation,
+  WhatsappMessage,
+} from "@/lib/data/whatsapp-inbox";
 
-const CHAT_PAGE_LIMIT = 20;
-const MESSAGE_LIMIT = 50;
+const CHAT_PAGE_LIMIT = 50;
+const MESSAGE_LIMIT = 100;
 
 type WahaStatusResponse = {
   status?: string;
-  error?: string;
-  me?: unknown;
 };
 
-type WahaRecord = Record<string, unknown>;
-
-type WahaChatMessage = WahaRecord & {
-  id?: unknown;
-  timestamp?: number | string | null;
-  fromMe?: boolean;
-  from_me?: boolean;
-  body?: unknown;
-  text?: unknown;
-  caption?: unknown;
-  content?: unknown;
-  _data?: WahaRecord;
-};
-type WahaChatOverview = WahaRecord & {
-  id?: string;
-  name?: string | null;
-  picture?: string | null;
-  lastMessage?: WahaChatMessage | null;
-};
-
-type ChatsResponse = {
-  chats?: WahaChatOverview[];
+type ConversationsResponse = {
+  conversations?: WhatsappConversation[];
+  tenantId?: string;
   error?: string;
 };
 
 type MessagesResponse = {
-  chatId?: string;
-  messages?: WahaChatMessage[];
+  conversation?: WhatsappConversation;
+  messages?: WhatsappMessage[];
   error?: string;
 };
 
-function getString(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
+type SendResponse = {
+  sent?: boolean;
+  message?: WhatsappMessage;
+  error?: string;
+};
 
-function getRecord(value: unknown): WahaRecord | null {
-  return value && typeof value === "object" ? (value as WahaRecord) : null;
-}
-
-function extractMessageText(message: WahaChatMessage | null | undefined) {
-  if (!message) return "";
-
-  const direct = [message.body, message.text, message.caption, message.content]
-    .map(getString)
-    .find(Boolean);
-
-  if (direct) return direct;
-
-  const data = getRecord(message._data);
-  if (!data) return "";
-
-  return [data.body, data.text, data.caption, data.content]
-    .map(getString)
-    .find(Boolean) ?? "";
-}
-
-function extractTimestamp(value: unknown) {
-  const timestamp = Number(value);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
-
-  return new Date(timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp);
-}
-
-function formatTime(value: unknown) {
-  const date = extractTimestamp(value);
-  if (!date) return "";
+function formatTime(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
 
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
@@ -114,53 +73,53 @@ function formatTime(value: unknown) {
   }).format(date);
 }
 
-function getChatId(chat: WahaChatOverview) {
-  return getString(chat.id);
+function messageTime(message: WhatsappMessage) {
+  return new Date(message.sent_at ?? message.created_at).getTime() || 0;
 }
 
-function getChatName(chat: WahaChatOverview) {
-  const id = getChatId(chat);
-  return getString(chat.name) || id.split("@")[0] || "Unknown chat";
+function sortConversations(conversations: WhatsappConversation[]) {
+  return [...conversations].sort((left, right) => {
+    const rightTime = new Date(right.last_message_at ?? right.updated_at).getTime();
+    const leftTime = new Date(left.last_message_at ?? left.updated_at).getTime();
+    return rightTime - leftTime;
+  });
 }
 
-function isFromMe(message: WahaChatMessage) {
-  if (typeof message.fromMe === "boolean") return message.fromMe;
-  if (typeof message.from_me === "boolean") return message.from_me;
+export function mergeInboxMessage(
+  messages: WhatsappMessage[],
+  next: WhatsappMessage,
+) {
+  const matchIndex = messages.findIndex(
+    (message) =>
+      message.id === next.id ||
+      (next.client_message_id && message.client_message_id === next.client_message_id) ||
+      (next.idempotency_key && message.idempotency_key === next.idempotency_key) ||
+      (next.provider_message_id &&
+        message.provider_message_id === next.provider_message_id),
+  );
 
-  const data = getRecord(message._data);
-  if (typeof data?.fromMe === "boolean") return data.fromMe;
-  if (typeof data?.from_me === "boolean") return data.from_me;
+  if (matchIndex === -1) {
+    return [...messages, next].sort((left, right) => messageTime(left) - messageTime(right));
+  }
 
-  return false;
+  return messages
+    .map((message, index) => (index === matchIndex ? { ...message, ...next } : message))
+    .sort((left, right) => messageTime(left) - messageTime(right));
 }
 
-function getMessageKey(message: WahaChatMessage, index: number) {
-  const id = message.id;
-  if (typeof id === "string") return id;
-
-  const idObject = getRecord(id);
-  const serialized = getString(idObject?._serialized) || getString(idObject?.id);
-  return serialized || `${message.timestamp ?? "message"}-${index}`;
-}
 function resolveErrorMessage(response: Response, fallback: string) {
-  if (response.status === 401) {
-    return "Session expired. Please log in again.";
-  }
-
-  if (response.status === 502) {
-    return "Chat history is unavailable from the current WAHA engine/store configuration.";
-  }
-
+  if (response.status === 401) return "Session expired. Please log in again.";
+  if (response.status === 403) return "WhatsApp inbox is unavailable for this tenant.";
   return fallback;
 }
 
 export function WhatsappInboxButton() {
   const [opened, setOpened] = useState(false);
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [status, setStatus] = useState("UNKNOWN");
-  const [chats, setChats] = useState<WahaChatOverview[]>([]);
-  const [messages, setMessages] = useState<WahaChatMessage[]>([]);
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<WhatsappConversation[]>([]);
+  const [messages, setMessages] = useState<WhatsappMessage[]>([]);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [messageText, setMessageText] = useState("");
   const [chatError, setChatError] = useState<string | null>(null);
   const [messageError, setMessageError] = useState<string | null>(null);
@@ -168,34 +127,21 @@ export function WhatsappInboxButton() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const messagesViewportRef = useRef<HTMLDivElement>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messageRequestRef = useRef(0);
+  const messageAbortRef = useRef<AbortController | null>(null);
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
 
-  const selectedChat = useMemo(
-    () => chats.find((chat) => getChatId(chat) === selectedChatId) ?? null,
-    [chats, selectedChatId],
-  );
+  if (!supabaseRef.current) {
+    supabaseRef.current = createClient();
+  }
 
-  const sortedMessages = useMemo(
+  const selectedConversation = useMemo(
     () =>
-      [...messages].sort((left, right) => {
-        const leftTime = extractTimestamp(left.timestamp)?.getTime() ?? 0;
-        const rightTime = extractTimestamp(right.timestamp)?.getTime() ?? 0;
-        return leftTime - rightTime;
-      }),
-    [messages],
+      conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
+    [conversations, selectedConversationId],
   );
-
-  const latestMessageKey = sortedMessages.length
-    ? getMessageKey(sortedMessages[sortedMessages.length - 1], sortedMessages.length - 1)
-    : null;
-
-  const scrollToLatestMessage = useCallback((behavior: ScrollBehavior = "auto") => {
-    requestAnimationFrame(() => {
-      const viewport = messagesViewportRef.current;
-      if (!viewport) return;
-
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
-    });
-  }, []);
+  const selectedConversationRequestId = selectedConversation?.id ?? null;
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -207,140 +153,280 @@ export function WhatsappInboxButton() {
     }
   }, []);
 
-  const fetchChats = useCallback(async () => {
+  const fetchConversations = useCallback(async () => {
     setLoadingChats(true);
     setChatError(null);
 
     try {
-      const response = await fetch(`/api/waha/chats?limit=${CHAT_PAGE_LIMIT}&offset=0`);
-      const data = (await response.json()) as ChatsResponse;
-
+      const response = await fetch(`/api/waha/chats?limit=${CHAT_PAGE_LIMIT}`);
+      const data = (await response.json()) as ConversationsResponse;
       if (!response.ok) {
         throw new Error(
-          resolveErrorMessage(response, data.error || "Failed to load WhatsApp chats."),
+          resolveErrorMessage(response, data.error || "Failed to load WhatsApp conversations."),
         );
       }
 
-      const loadedChats = Array.isArray(data.chats) ? data.chats : [];
-      setChats(loadedChats);
-      return loadedChats;
+      const loadedConversations = Array.isArray(data.conversations)
+        ? sortConversations(data.conversations)
+        : [];
+      setConversations(loadedConversations);
+      setTenantId(data.tenantId || null);
+      setSelectedConversationId((current) =>
+        current && loadedConversations.some((conversation) => conversation.id === current)
+          ? current
+          : loadedConversations[0]?.id ?? null,
+      );
+      return loadedConversations;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load WhatsApp chats.";
-      setChatError(message);
+      setChatError(
+        error instanceof Error ? error.message : "Failed to load WhatsApp conversations.",
+      );
       return null;
     } finally {
       setLoadingChats(false);
     }
   }, []);
 
-  const fetchMessages = useCallback(async (chatId: string) => {
+  const fetchMessages = useCallback(async (conversationId: string) => {
+    messageAbortRef.current?.abort();
+    const controller = new AbortController();
+    messageAbortRef.current = controller;
+    const requestId = ++messageRequestRef.current;
     setLoadingMessages(true);
     setMessageError(null);
 
     try {
       const response = await fetch(
-        `/api/waha/chats/${encodeURIComponent(chatId)}/messages?limit=${MESSAGE_LIMIT}`,
+        `/api/waha/chats/${encodeURIComponent(conversationId)}/messages?limit=${MESSAGE_LIMIT}`,
+        { signal: controller.signal },
       );
       const data = (await response.json()) as MessagesResponse;
-
+      if (requestId !== messageRequestRef.current) return false;
       if (!response.ok) {
         throw new Error(
           resolveErrorMessage(response, data.error || "Failed to load WhatsApp messages."),
         );
       }
+      if (data.conversation?.id !== conversationId) return false;
 
       setMessages(Array.isArray(data.messages) ? data.messages : []);
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load WhatsApp messages.";
-      setMessageError(message);
+      if (requestId !== messageRequestRef.current || controller.signal.aborted) {
+        return false;
+      }
+      setMessageError(
+        error instanceof Error ? error.message : "Failed to load WhatsApp messages.",
+      );
       return false;
     } finally {
-      setLoadingMessages(false);
+      if (requestId === messageRequestRef.current) {
+        setLoadingMessages(false);
+      }
     }
   }, []);
 
-  const refreshInbox = useCallback(async () => {
-    const activeChatId = selectedChatId;
-    await fetchStatus();
-    const loadedChats = await fetchChats();
-
-    if (activeChatId) {
-      const activeChatStillVisible =
-        !loadedChats || loadedChats.some((chat) => getChatId(chat) === activeChatId);
-
-      if (activeChatStillVisible) {
-        await fetchMessages(activeChatId);
-      } else {
-        setSelectedChatId(null);
-        setMessages([]);
-        setMessageError(null);
-      }
+  const markRead = useCallback(async (conversation: WhatsappConversation) => {
+    try {
+      await fetch(`/api/waha/chats/${encodeURIComponent(conversation.id)}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "mark-read" }),
+      });
+    } catch {
+      // Realtime/snapshot remains authoritative; a failed read marker is non-blocking.
     }
+  }, []);
 
-    setHasLoadedOnce(true);
-  }, [fetchChats, fetchMessages, fetchStatus, selectedChatId]);
+  const syncInbox = useCallback(async () => {
+    await Promise.all([fetchStatus(), fetchConversations()]);
+  }, [fetchConversations, fetchStatus]);
 
-  const handleSelectChat = useCallback(
-    (chatId: string) => {
-      setSelectedChatId(chatId);
-      setMessages([]);
-      void fetchMessages(chatId);
+  const scheduleHydratedRefresh = useCallback(
+    (refreshMessages = false) => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = setTimeout(() => {
+        void fetchConversations();
+        if (refreshMessages && selectedConversationRequestId) {
+          void fetchMessages(selectedConversationRequestId);
+        }
+      }, 150);
     },
-    [fetchMessages],
+    [fetchConversations, fetchMessages, selectedConversationRequestId],
+  );
+
+  const handleSelectConversation = useCallback(
+    (conversation: WhatsappConversation) => {
+      if (conversation.id === selectedConversationId) {
+        if (!loadingMessages && messages.length === 0) {
+          void fetchMessages(conversation.id);
+        }
+        void markRead(conversation);
+        return;
+      }
+
+      setLoadingMessages(true);
+      setMessages([]);
+      setSelectedConversationId(conversation.id);
+      void markRead(conversation);
+    },
+    [fetchMessages, loadingMessages, markRead, messages.length, selectedConversationId],
   );
 
   const handleSend = async () => {
-    if (!selectedChatId || !messageText.trim()) return;
+    if (!selectedConversation || !messageText.trim()) return;
 
+    const text = messageText.trim();
+    const clientMessageId = crypto.randomUUID();
+    const optimisticMessage: WhatsappMessage = {
+      id: clientMessageId,
+      tenant_id: selectedConversation.tenant_id,
+      conversation_id: selectedConversation.id,
+      session_name: selectedConversation.session_name,
+      chat_id: selectedConversation.chat_id,
+      provider_message_id: null,
+      client_message_id: clientMessageId,
+      idempotency_key: `client:${clientMessageId}`,
+      direction: "outbound",
+      content: text,
+      status: "sending",
+      error_message: null,
+      provider_response: null,
+      created_by: null,
+      sent_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    setMessages((current) => mergeInboxMessage(current, optimisticMessage));
+    setMessageText("");
     setSending(true);
+
     try {
       const response = await fetch(
-        `/api/waha/chats/${encodeURIComponent(selectedChatId)}/messages`,
+        `/api/waha/chats/${encodeURIComponent(selectedConversation.id)}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: messageText.trim() }),
+          body: JSON.stringify({ text, clientMessageId }),
         },
       );
-      const data = (await response.json()) as { error?: string };
+      const data = (await response.json()) as SendResponse;
+
+      if (data.message) {
+        setMessages((current) => mergeInboxMessage(current, data.message!));
+      }
+
+      if (response.status === 409) {
+        void fetchMessages(selectedConversation.id);
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to send WhatsApp message.");
       }
-
-      setMessageText("");
-      notifications.show({
-        title: "Message sent",
-        message: "WhatsApp message sent successfully.",
-        color: "green",
-      });
-      await fetchMessages(selectedChatId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to send WhatsApp message.";
-      notifications.show({
-        title: "Send failed",
-        message,
-        color: "red",
-      });
+      const failure = error instanceof Error ? error.message : "Failed to send WhatsApp message.";
+      setMessages((current) =>
+        current.map((message) =>
+          message.client_message_id === clientMessageId
+            ? { ...message, status: "failed", error_message: failure }
+            : message,
+        ),
+      );
+      notifications.show({ title: "Send failed", message: failure, color: "red" });
     } finally {
       setSending(false);
     }
   };
 
   useEffect(() => {
-    if (opened && !hasLoadedOnce) {
-      void refreshInbox();
-    }
-  }, [hasLoadedOnce, opened, refreshInbox]);
+    if (!opened) return;
+    void syncInbox();
+  }, [opened, syncInbox]);
 
   useEffect(() => {
-    if (!opened || !selectedChatId || loadingMessages) return;
-    scrollToLatestMessage("smooth");
-  }, [latestMessageKey, loadingMessages, opened, scrollToLatestMessage, selectedChatId]);
+    if (!opened || !selectedConversationRequestId) return;
+    void fetchMessages(selectedConversationRequestId);
+  }, [fetchMessages, opened, selectedConversationRequestId]);
+
+  useEffect(() => {
+    if (!opened || !tenantId) return;
+    const supabase = supabaseRef.current!;
+    const channel = supabase
+      .channel(`whatsapp-inbox:${tenantId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "whatsapp_conversations",
+          filter: `tenant_id=eq.${tenantId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "DELETE") {
+            setConversations((current) =>
+              current.filter((conversation) => conversation.id !== payload.old.id),
+            );
+            return;
+          }
+          scheduleHydratedRefresh(false);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "whatsapp_messages",
+          filter: `tenant_id=eq.${tenantId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "DELETE") {
+            setMessages((current) => current.filter((message) => message.id !== payload.old.id));
+            scheduleHydratedRefresh(false);
+            return;
+          }
+          const next = payload.new as WhatsappMessage;
+          scheduleHydratedRefresh(next.conversation_id === selectedConversationId);
+        },
+      )
+      .subscribe((subscriptionStatus) => {
+        if (subscriptionStatus === "SUBSCRIBED") {
+          void fetchConversations();
+        }
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [fetchConversations, opened, scheduleHydratedRefresh, selectedConversationId, tenantId]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && opened) {
+        void syncInbox();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [opened, syncInbox]);
+
+  useEffect(() => {
+    if (!opened || !selectedConversationId || loadingMessages) return;
+    requestAnimationFrame(() => {
+      const viewport = messagesViewportRef.current;
+      if (!viewport) return;
+      const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      if (distanceFromBottom < 120) {
+        viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+      }
+    });
+  }, [loadingMessages, messages.length, opened, selectedConversationId]);
 
   const isConnected = status === "WORKING";
-  const composerDisabled = !selectedChatId || !isConnected || sending;
+  const composerDisabled = !selectedConversation || !isConnected || sending;
+
   return (
     <>
       <Tooltip label="Open WhatsApp inbox" position="left">
@@ -386,15 +472,15 @@ export function WhatsappInboxButton() {
               size="xs"
               variant="light"
               leftSection={<IconRefresh size={14} />}
-              onClick={() => void refreshInbox()}
+              onClick={() => void syncInbox()}
               loading={loadingChats || loadingMessages}
             >
-              Refresh
+              Sync now
             </Button>
           </Group>
 
           {chatError && (
-            <Alert icon={<IconAlertCircle size={16} />} color="red" title="Unable to load chats">
+            <Alert icon={<IconAlertCircle size={16} />} color="red" title="Unable to load conversations">
               {chatError}
             </Alert>
           )}
@@ -410,53 +496,41 @@ export function WhatsappInboxButton() {
               <Box style={{ borderRight: "1px solid var(--mantine-color-gray-2)", minHeight: 0 }}>
                 <ScrollArea h="100%">
                   <Stack gap={0}>
-                    {loadingChats && chats.length === 0 ? (
-                      <Group justify="center" py="xl">
-                        <Loader size="sm" />
-                        <Text size="sm" c="dimmed">Loading chats...</Text>
-                      </Group>
-                    ) : chats.length === 0 ? (
+                    {loadingChats && conversations.length === 0 ? (
+                      <Group justify="center" py="xl"><Loader size="sm" /><Text size="sm" c="dimmed">Loading chats...</Text></Group>
+                    ) : conversations.length === 0 ? (
                       <Stack align="center" gap="xs" py="xl" px="md">
-                        <ThemeIcon color="gray" variant="light" radius="xl" size={44}>
-                          <IconMessageCircle size={22} />
-                        </ThemeIcon>
-                        <Text fw={600} size="sm">No chats loaded</Text>
-                        <Text size="xs" c="dimmed" ta="center">
-                          Click Refresh to load WhatsApp conversations.
-                        </Text>
+                        <ThemeIcon color="gray" variant="light" radius="xl" size={44}><IconMessageCircle size={22} /></ThemeIcon>
+                        <Text fw={600} size="sm">No conversations yet</Text>
+                        <Text size="xs" c="dimmed" ta="center">New direct WhatsApp messages appear here automatically.</Text>
                       </Stack>
                     ) : (
-                      chats.map((chat) => {
-                        const chatId = getChatId(chat);
-                        const active = chatId === selectedChatId;
-                        const preview = extractMessageText(chat.lastMessage);
-
+                      conversations.map((conversation) => {
+                        const active = conversation.id === selectedConversationId;
+                        const title = conversation.identity_title || conversation.display_name || conversation.normalized_phone || conversation.chat_id.split("@")[0];
+                        const subtitle = conversation.identity_subtitle || conversation.normalized_phone || conversation.chat_id;
                         return (
                           <UnstyledButton
-                            key={chatId}
-                            onClick={() => handleSelectChat(chatId)}
-                            disabled={!chatId}
-                            style={{
-                              display: "block",
-                              width: "100%",
-                              padding: "12px",
-                              background: active ? "var(--mantine-color-green-0)" : undefined,
-                              borderBottom: "1px solid var(--mantine-color-gray-1)",
-                            }}
+                            key={conversation.id}
+                            onClick={() => handleSelectConversation(conversation)}
+                            style={{ display: "block", width: "100%", padding: 12, background: active ? "var(--mantine-color-green-0)" : undefined, borderBottom: "1px solid var(--mantine-color-gray-1)" }}
                           >
                             <Group gap="sm" align="flex-start" wrap="nowrap">
-                              <Avatar src={chat.picture || undefined} radius="xl" color="green">
-                                {getChatName(chat).slice(0, 1).toUpperCase()}
-                              </Avatar>
+                              <Avatar radius="xl" color="green">{title.slice(0, 1).toUpperCase()}</Avatar>
                               <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
                                 <Group justify="space-between" gap="xs" wrap="nowrap">
-                                  <Text size="sm" fw={600} truncate>{getChatName(chat)}</Text>
-                                  <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
-                                    {formatTime(chat.lastMessage?.timestamp)}
-                                  </Text>
+                                  <Text size="sm" fw={600} truncate>{title}</Text>
+                                  <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>{formatTime(conversation.last_message_at)}</Text>
                                 </Group>
-                                <Text size="xs" c="dimmed" truncate>{chatId}</Text>
-                                <Text size="xs" truncate>{preview || "No text preview"}</Text>
+                                <Text size="xs" c="dimmed" truncate>{subtitle}</Text>
+                                <Group justify="space-between" gap="xs" wrap="nowrap">
+                                  <Group gap={4} wrap="nowrap">
+                                    {conversation.lifecycle_stage && <Badge size="xs" variant="light">{conversation.lifecycle_stage}</Badge>}
+                                    {conversation.needs_human_follow_up && <Badge size="xs" color="orange">Handoff</Badge>}
+                                  </Group>
+                                  {conversation.unread_count > 0 && <Badge color="green" size="sm" circle>{conversation.unread_count}</Badge>}
+                                </Group>
+                                <Text size="xs" truncate>{conversation.last_message_preview || "No text preview"}</Text>
                               </Stack>
                             </Group>
                           </UnstyledButton>
@@ -466,109 +540,47 @@ export function WhatsappInboxButton() {
                   </Stack>
                 </ScrollArea>
               </Box>
+
               <Stack gap="sm" p="md" style={{ minHeight: 0 }}>
-                {selectedChat ? (
+                {selectedConversation ? (
                   <>
-                    <Stack gap={2} style={{ minWidth: 0 }}>
-                      <Text fw={700} truncate>{getChatName(selectedChat)}</Text>
-                      <Text size="xs" c="dimmed" truncate>{selectedChatId}</Text>
+                    <Stack gap={2}>
+                      <Text fw={700} truncate>{selectedConversation.identity_title || selectedConversation.display_name || selectedConversation.normalized_phone || selectedConversation.chat_id}</Text>
+                      <Text size="xs" c="dimmed" truncate>{selectedConversation.identity_subtitle || selectedConversation.normalized_phone || selectedConversation.chat_id}</Text>
+                      <Group gap={4}>
+                        {selectedConversation.lifecycle_stage && <Badge size="xs" variant="light">{selectedConversation.lifecycle_stage}</Badge>}
+                        {selectedConversation.needs_human_follow_up && <Badge size="xs" color="orange">Human handoff</Badge>}
+                      </Group>
                     </Stack>
-
-                    {messageError && (
-                      <Alert icon={<IconAlertCircle size={16} />} color="red" title="Unable to load messages">
-                        {messageError}
-                      </Alert>
-                    )}
-
+                    {messageError && <Alert icon={<IconAlertCircle size={16} />} color="red" title="Unable to load messages">{messageError}</Alert>}
                     <Divider />
-
                     <ScrollArea viewportRef={messagesViewportRef} offsetScrollbars style={{ flex: 1 }}>
                       <Stack gap="xs" pr="xs">
                         {loadingMessages && messages.length === 0 ? (
-                          <Group justify="center" py="xl">
-                            <Loader size="sm" />
-                            <Text size="sm" c="dimmed">Loading messages...</Text>
-                          </Group>
-                        ) : sortedMessages.length === 0 ? (
-                          <Stack align="center" py="xl" gap="xs">
-                            <ThemeIcon color="gray" variant="light" radius="xl" size={44}>
-                              <IconMessageCircle size={22} />
-                            </ThemeIcon>
-                            <Text fw={600} size="sm">No messages loaded</Text>
-                            <Text size="xs" c="dimmed" ta="center">
-                              Click Refresh if this chat has history.
-                            </Text>
-                          </Stack>
-                        ) : (
-                          sortedMessages.map((message, index) => {
-                            const outgoing = isFromMe(message);
-                            const text = extractMessageText(message) || "Unsupported message content";
-
-                            return (
-                              <Group key={getMessageKey(message, index)} justify={outgoing ? "flex-end" : "flex-start"} align="flex-end">
-                                <Box
-                                  maw="78%"
-                                  px="sm"
-                                  py={8}
-                                  style={{
-                                    borderRadius: "var(--mantine-radius-md)",
-                                    background: outgoing
-                                      ? "var(--mantine-color-green-1)"
-                                      : "var(--mantine-color-gray-1)",
-                                  }}
-                                >
-                                  <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>{text}</Text>
-                                  <Text size="xs" c="dimmed" ta="right" mt={4}>
-                                    {formatTime(message.timestamp)}
-                                  </Text>
-                                </Box>
-                              </Group>
-                            );
-                          })
-                        )}
+                          <Group justify="center" py="xl"><Loader size="sm" /><Text size="sm" c="dimmed">Loading messages...</Text></Group>
+                        ) : messages.length === 0 ? (
+                          <Stack align="center" py="xl" gap="xs"><ThemeIcon color="gray" variant="light" radius="xl" size={44}><IconMessageCircle size={22} /></ThemeIcon><Text fw={600} size="sm">No messages yet</Text></Stack>
+                        ) : messages.map((message) => {
+                          const outgoing = message.direction === "outbound";
+                          return (
+                            <Group key={message.id} justify={outgoing ? "flex-end" : "flex-start"} align="flex-end">
+                              <Box maw="78%" px="sm" py={8} style={{ borderRadius: "var(--mantine-radius-md)", background: outgoing ? "var(--mantine-color-green-1)" : "var(--mantine-color-gray-1)" }}>
+                                <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>{message.content}</Text>
+                                <Text size="xs" c={message.status === "failed" ? "red" : "dimmed"} ta="right" mt={4}>{message.status === "failed" ? "Failed" : formatTime(message.sent_at ?? message.created_at)}</Text>
+                              </Box>
+                            </Group>
+                          );
+                        })}
                       </Stack>
                     </ScrollArea>
-
-                    {!isConnected && (
-                      <Alert color="yellow" title="WhatsApp is not connected">
-                        WhatsApp is not connected. Connect it from Settings &gt; WhatsApp Connect.
-                      </Alert>
-                    )}
-
+                    {!isConnected && <Alert color="yellow" title="WhatsApp is not connected">WhatsApp is not connected. Connect it from Settings &gt; WhatsApp Connect.</Alert>}
                     <Group align="flex-end" wrap="nowrap">
-                      <Textarea
-                        label="Message"
-                        placeholder="Type a WhatsApp message"
-                        value={messageText}
-                        onChange={(event) => setMessageText(event.currentTarget.value)}
-                        autosize
-                        minRows={1}
-                        maxRows={4}
-                        disabled={composerDisabled}
-                        style={{ flex: 1 }}
-                      />
-                      <ActionIcon
-                        aria-label="Send WhatsApp message"
-                        color="green"
-                        size="lg"
-                        onClick={() => void handleSend()}
-                        loading={sending}
-                        disabled={composerDisabled || !messageText.trim()}
-                      >
-                        <IconSend size={18} />
-                      </ActionIcon>
+                      <Textarea label="Message" placeholder="Type a WhatsApp message" value={messageText} onChange={(event) => setMessageText(event.currentTarget.value)} autosize minRows={1} maxRows={4} disabled={composerDisabled} style={{ flex: 1 }} />
+                      <ActionIcon aria-label="Send WhatsApp message" color="green" size="lg" onClick={() => void handleSend()} loading={sending} disabled={composerDisabled || !messageText.trim()}><IconSend size={18} /></ActionIcon>
                     </Group>
                   </>
                 ) : (
-                  <Stack align="center" justify="center" h="100%" gap="sm">
-                    <ThemeIcon color="green" variant="light" radius="xl" size={56}>
-                      <IconBrandWhatsapp size={28} />
-                    </ThemeIcon>
-                    <Text fw={700}>Select a chat</Text>
-                    <Text size="sm" c="dimmed" ta="center" maw={320}>
-                      Choose a WhatsApp chat from the list, then use manual refresh to load messages.
-                    </Text>
-                  </Stack>
+                  <Stack align="center" justify="center" h="100%" gap="sm"><ThemeIcon color="green" variant="light" radius="xl" size={56}><IconBrandWhatsapp size={28} /></ThemeIcon><Text fw={700}>Select a chat</Text><Text size="sm" c="dimmed" ta="center" maw={320}>New direct WhatsApp messages appear automatically without refreshing this page.</Text></Stack>
                 )}
               </Stack>
             </Box>

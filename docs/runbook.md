@@ -230,6 +230,36 @@ requestId:"abc-123" AND level:"error"
 - Sistem kini memakai fallback otomatis untuk error AI provider retryable (termasuk 429), sehingga webhook tetap `200` dan tamu menerima pesan bahwa tim hotel akan follow-up manual.
 - Jika 429 sering berulang, pindah ke model Gemini yang lebih stabil atau tingkatkan kuota billing API key.
 
+### Realtime WhatsApp Inbox
+
+**Prerequisite:** Apply these migrations manually in order before deploying this feature: `20260804000000_add_realtime_whatsapp_inbox.sql`, `20260804000001_add_whatsapp_conversation_identity.sql`, `20260804000002_add_whatsapp_canonical_conversation_key.sql`, then `20260804000003_add_whatsapp_message_idempotency.sql`. Together they create the inbox tables, identity links, canonical direct-chat threads, tenant-scoped RLS read policies, indexes, Realtime publication entries, and message idempotency keys.
+
+**Symptoms:**
+
+- New WhatsApp messages only appear after **Sync now** or a browser reload.
+- The inbox returns `403` or says it is unavailable for the tenant.
+- An unmatched direct chat does not appear in the drawer.
+
+**Actions:**
+
+1. Set `WAHA_DEFAULT_TENANT_ID` to the UUID of the one tenant allowed to own the WAHA Core `default` session, then restart the app.
+2. Confirm `whatsapp_conversations` and `whatsapp_messages` are in the `supabase_realtime` publication after the migration.
+3. Confirm the staff user belongs to `WAHA_DEFAULT_TENANT_ID`; other tenants are deliberately denied access to this one-session inbox.
+4. Send a direct text to the connected WhatsApp number. The webhook should return `success:inbox-only` for an unmatched chat, or the usual lifecycle status for a matching reservation.
+5. Open the drawer and check browser network/WebSocket connectivity to Supabase Realtime. Use **Sync now** only to reconcile a suspended/offline browser tab.
+6. Direct-text chat is the supported scope. Groups and non-text media are intentionally ignored in this phase.
+
+**Recovery:**
+
+- If a webhook arrived while the browser was offline, focus the tab or use **Sync now**; the persisted database snapshot restores missed rows.
+- Existing conversations that have an unambiguous matching guest phone resolve the guest name, room, and reservation status lazily when the inbox loads. Ambiguous or unknown numbers stay number-only rather than being linked to the wrong guest.
+- If the same guest appears in two boxes after app-first sending, WAHA likely reported the phone alias (`@c.us`) for the outbound event and an LID alias (`@lid`) for the inbound event. Apply `20260804000002_add_whatsapp_canonical_conversation_key.sql` after the prior inbox migrations during a short webhook write pause. It reassigns messages to one survivor before deleting duplicates, so no transcript is lost; run its commented preflight/postflight SQL checks.
+- Direct inbox conversations are one thread per tenant/session/resolved phone, not one thread per reservation or WAHA alias. The latest valid LID/phone alias is retained only for WAHA sending.
+- If a transcript shows **No messages yet** after selecting a chat, refresh to the newest build: transcript fetches are request-sequenced so an already-selected row and a slow prior request cannot clear the active history. If it persists, inspect `/api/waha/chats/<conversation-id>/messages` and confirm it returns the selected `conversation.id`.
+- Apply `20260804000003_add_whatsapp_message_idempotency.sql` after the prior inbox migrations. It adds provider/client idempotency keys so a manual or AI send and its WAHA `fromMe` echo reconcile into one `whatsapp_messages` row. Use its commented preflight query to inspect duplicate provider/client IDs before enabling the new writers.
+- Do not assign multiple tenants to WAHA session `default`. Migrate to unique per-tenant WAHA sessions before enabling multi-tenant inbox operation.
+- If the migration has not been applied, do not enable the new inbox UI; its database queries and realtime subscriptions require both inbox tables.
+
 ### Lifecycle Intent Guard and Handoff Triage
 
 **Symptoms:**

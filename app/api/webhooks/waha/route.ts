@@ -18,6 +18,14 @@ import {
   upsertLifecycleAiSession,
 } from "@/lib/ai/lifecycle-session";
 import { wahaClient } from "@/lib/waha/client";
+import { getCanonicalWahaMessageId } from "@/lib/waha/message-id";
+import {
+  buildWhatsappConversationKey,
+  insertWhatsappMessage,
+  resolveWhatsappConversationIdentity,
+  upsertWhatsappConversation,
+} from "@/lib/data/whatsapp-inbox";
+import { resolveDefaultWahaWebhookTenant } from "@/lib/waha/session";
 
 const RESERVATION_LOOKUP_SELECT = `
   id,
@@ -416,42 +424,6 @@ async function resolvePhoneLookupFromChatId(session: string, chatId: string) {
       phoneCandidates: buildPhoneLookupCandidates(chatId),
     };
   }
-}
-
-function getProviderMessageId(message: Record<string, unknown>) {
-  const id = message.id;
-  if (typeof id === "string") {
-    const normalized = id.trim();
-    return normalized || null;
-  }
-
-  if (id && typeof id === "object") {
-    const idObject = id as Record<string, unknown>;
-    const nestedId = getFirstNonEmptyString([
-      idObject.id,
-      idObject._serialized,
-      idObject.serialized,
-    ]);
-
-    if (nestedId) {
-      return nestedId;
-    }
-  }
-
-  const dataObject = toRecord(message._data);
-  const dataIdObject = toRecord(dataObject?.id);
-  const fallbackId = getFirstNonEmptyString([
-    dataObject?.id,
-    dataObject?._serialized,
-    dataIdObject?.id,
-    dataIdObject?._serialized,
-  ]);
-
-  if (fallbackId) {
-    return fallbackId;
-  }
-
-  return null;
 }
 
 function buildFallbackInboundMessageId(rawBody: string) {
@@ -886,9 +858,9 @@ export async function POST(req: NextRequest) {
     const fromMe = parseBooleanLike(message?.fromMe ?? message?.from_me);
     const isGroup = parseBooleanLike(message?.isGroup ?? message?.is_group);
 
-    if (!message || fromMe || isGroup) {
+    if (!message || isGroup) {
       return NextResponse.json(
-        { status: "ignored: fromMe or group" },
+        { status: "ignored: group or invalid message" },
         { status: 200 },
       );
     }
@@ -917,25 +889,91 @@ export async function POST(req: NextRequest) {
     const supabase = await createAdminClient();
     const lifecycleDebugEnabled = isLifecycleAiDebugEnabled();
     const providerMessageId =
-      getProviderMessageId(message) ?? buildFallbackInboundMessageId(rawBody);
+      getCanonicalWahaMessageId(message) ?? buildFallbackInboundMessageId(rawBody);
+    const configuredTenantId = resolveDefaultWahaWebhookTenant(session);
+    const reservationMatch = fromMe
+      ? null
+      : await findActiveLifecycleReservationByPhone(supabase, phoneCandidates);
 
-    const reservationMatch = await findActiveLifecycleReservationByPhone(
-      supabase,
-      phoneCandidates,
-    );
-
-    if (!reservationMatch) {
-      // Tidak ada reservasi lifecycle aktif untuk nomor ini
+    if (
+      configuredTenantId &&
+      reservationMatch &&
+      reservationMatch.reservation.tenant_id !== configuredTenantId
+    ) {
       return NextResponse.json(
-        { status: "ignored: no active lifecycle reservation found" },
+        { status: "ignored: session tenant does not match reservation" },
         { status: 200 },
       );
+    }
+
+    const tenantId = configuredTenantId ?? reservationMatch?.reservation.tenant_id;
+    if (!tenantId) {
+      return NextResponse.json(
+        { status: "ignored: unknown WAHA session tenant" },
+        { status: 200 },
+      );
+    }
+
+    const inboxIdentity = await resolveWhatsappConversationIdentity(supabase, {
+      tenantId,
+      normalizedPhone: phone || null,
+      guestId: reservationMatch?.reservation.guest_id ?? null,
+      reservationId: reservationMatch?.reservation.id ?? null,
+      displayName: reservationMatch?.reservation.guests?.[0]?.name ?? null,
+    });
+    const inboxConversation = await upsertWhatsappConversation(supabase, {
+      tenantId,
+      sessionName: session,
+      chatId,
+      normalizedPhone: phone || null,
+      conversationKey: buildWhatsappConversationKey(phone || null, chatId),
+      guestId: inboxIdentity.guestId,
+      reservationId: inboxIdentity.reservationId,
+      displayName: inboxIdentity.displayName,
+      metadata: {
+        identity_source: reservationMatch ? "lifecycle_reservation" : "guest_phone",
+        resolved_phone_chat_id: resolvedPhoneChatId || null,
+        phone_candidates: phoneCandidates,
+        waha_lid: isLidChatId(chatId) ? chatId : null,
+      },
+    });
+    const inboundInboxMessage = await insertWhatsappMessage(
+      supabase,
+      inboxConversation,
+      {
+        tenantId,
+        conversationId: inboxConversation.id,
+        sessionName: session,
+        chatId,
+        providerMessageId,
+        direction: fromMe ? "outbound" : "inbound",
+        content: body,
+        status: fromMe ? "sent" : "received",
+        sentAt: new Date(
+          Number(message.timestamp ?? Date.now() / 1000) * 1000,
+        ).toISOString(),
+      },
+    );
+
+    if (inboundInboxMessage.duplicate) {
+      return NextResponse.json(
+        { status: "ignored: duplicate message" },
+        { status: 200 },
+      );
+    }
+
+    if (fromMe) {
+      return NextResponse.json({ status: "success:outbound-inbox-only" });
+    }
+
+    if (!reservationMatch) {
+      return NextResponse.json({ status: "success:inbox-only" });
     }
 
     const { reservation, lifecycleStage } = reservationMatch;
     const triggerType = lifecycleStage;
 
-    // 3. Simpan pesan masuk (inbound) dari tamu ke tabel message_logs
+    // Persist lifecycle audit history separately from the full inbox transcript.
     const { error: inboundInsertError } = await supabase
       .from("message_logs")
       .insert({
@@ -960,7 +998,7 @@ export async function POST(req: NextRequest) {
 
     if (isUniqueViolationError(inboundInsertError)) {
       if (lifecycleDebugEnabled) {
-        console.info("[WAHA][Lifecycle AI] Duplicate inbound ignored", {
+        console.info("[WAHA][Lifecycle AI] Duplicate lifecycle inbound ignored", {
           tenantId: reservation.tenant_id,
           reservationId: reservation.id,
           lifecycleStage,
@@ -969,7 +1007,7 @@ export async function POST(req: NextRequest) {
       }
 
       return NextResponse.json(
-        { status: "ignored: duplicate message" },
+        { status: "ignored: duplicate lifecycle message" },
         { status: 200 },
       );
     }
@@ -979,6 +1017,32 @@ export async function POST(req: NextRequest) {
         inboundInsertError.message || "Failed to insert inbound message",
       );
     }
+
+    const persistInboxOutbound = async (
+      content: string,
+      sentAt: string,
+      providerResponse?: unknown,
+    ) => {
+      const providerMessageId = getCanonicalWahaMessageId(providerResponse);
+      await insertWhatsappMessage(supabase, inboxConversation, {
+        tenantId,
+        conversationId: inboxConversation.id,
+        sessionName: session,
+        chatId,
+        providerMessageId,
+        idempotencyKey: providerMessageId
+          ? `provider:${providerMessageId}`
+          : `ai:${createHash("sha256").update(`${triggerType}:${content}:${sentAt}`).digest("hex")}`,
+        direction: "outbound",
+        content,
+        status: "sent",
+        sentAt,
+        providerResponse:
+          providerResponse && typeof providerResponse === "object"
+            ? (providerResponse as Record<string, unknown>)
+            : null,
+      });
+    };
 
     if (lifecycleDebugEnabled) {
       console.info("[WAHA][Lifecycle AI] Route selected", {
@@ -1057,7 +1121,7 @@ export async function POST(req: NextRequest) {
         pointsAwarded: rewardResult.pointsAwarded,
       });
 
-      await wahaClient.sendMessage(session, chatId, replyText);
+      const providerResponse = await wahaClient.sendMessage(session, chatId, replyText);
       const sentAt = new Date().toISOString();
       await supabase.from("message_logs").insert({
         tenant_id: reservation.tenant_id,
@@ -1075,6 +1139,7 @@ export async function POST(req: NextRequest) {
         provider_lid: isLidChatId(chatId) ? chatId : null,
         source: "automation",
       });
+      await persistInboxOutbound(replyText, sentAt, providerResponse);
 
       await upsertLifecycleAiSession(supabase, {
         tenantId: reservation.tenant_id,
@@ -1166,7 +1231,7 @@ export async function POST(req: NextRequest) {
         COMPLETED_POST_STAY_HANDOFF_REPLIES[preferredLanguage];
       const fallbackUsed = false;
 
-      await wahaClient.sendMessage(session, chatId, replyText);
+      const providerResponse = await wahaClient.sendMessage(session, chatId, replyText);
       const sentAt = new Date().toISOString();
       await supabase.from("message_logs").insert({
         tenant_id: reservation.tenant_id,
@@ -1184,6 +1249,7 @@ export async function POST(req: NextRequest) {
         provider_lid: isLidChatId(chatId) ? chatId : null,
         source: "ai",
       });
+      await persistInboxOutbound(replyText, sentAt, providerResponse);
 
       await upsertLifecycleAiSession(supabase, {
         tenantId: reservation.tenant_id,
@@ -1276,7 +1342,7 @@ export async function POST(req: NextRequest) {
 
       const replyText = intentGuard.reply;
       if (replyText) {
-        await wahaClient.sendMessage(session, chatId, replyText);
+        const providerResponse = await wahaClient.sendMessage(session, chatId, replyText);
         const sentAt = new Date().toISOString();
         await supabase.from("message_logs").insert({
           tenant_id: reservation.tenant_id,
@@ -1294,6 +1360,7 @@ export async function POST(req: NextRequest) {
           provider_lid: isLidChatId(chatId) ? chatId : null,
           source: "ai",
         });
+        await persistInboxOutbound(replyText, sentAt, providerResponse);
       }
 
       const nextClarificationCount =
@@ -1396,7 +1463,7 @@ export async function POST(req: NextRequest) {
         },
       );
 
-      await wahaClient.sendMessage(session, chatId, fallbackReply);
+      const providerResponse = await wahaClient.sendMessage(session, chatId, fallbackReply);
       const sentAt = new Date().toISOString();
       await supabase.from("message_logs").insert({
         tenant_id: reservation.tenant_id,
@@ -1414,6 +1481,7 @@ export async function POST(req: NextRequest) {
         provider_lid: isLidChatId(chatId) ? chatId : null,
         source: "ai",
       });
+      await persistInboxOutbound(fallbackReply, sentAt, providerResponse);
 
       await upsertLifecycleAiSession(supabase, {
         tenantId: reservation.tenant_id,
@@ -1457,7 +1525,7 @@ export async function POST(req: NextRequest) {
       // 6. Tanggapi via WhatsApp (Kirim Pesan Keluar)
       // Ambil session conf dari tenant ini if any, else use 'default'
       // Untuk limitasi MVP: 'default' session name digunakan.
-      await wahaClient.sendMessage(session, chatId, replyText);
+      const providerResponse = await wahaClient.sendMessage(session, chatId, replyText);
       const sentAt = new Date().toISOString();
 
       // 7. Simpan balasan AI (outbound) ke message_logs
@@ -1477,6 +1545,7 @@ export async function POST(req: NextRequest) {
         provider_lid: isLidChatId(chatId) ? chatId : null,
         source: "ai",
       });
+      await persistInboxOutbound(replyText, sentAt, providerResponse);
 
       const latestLifecycleSession = await getLifecycleAiSessionState(supabase, {
         tenantId: reservation.tenant_id,

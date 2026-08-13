@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { wahaClient } from "@/lib/waha/client";
 import { getCurrentUserTenant } from "@/lib/auth/tenant";
+import { resolveDefaultWahaSessionForTenant } from "@/lib/waha/session";
 
 type WahaSessionInfo = {
   name: string;
@@ -13,9 +14,17 @@ export async function GET() {
   if (!userTenant)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // WAHA Core free version only supports 1 session, typically named "default"
-  // In a multi-tenant paid setup, this would be userTenant.tenantId
-  const sessionId = "default";
+  const configuredSession = resolveDefaultWahaSessionForTenant(
+    userTenant.tenantId,
+  );
+  if (!configuredSession) {
+    return NextResponse.json(
+      { error: "WhatsApp inbox is unavailable for this tenant." },
+      { status: 403 },
+    );
+  }
+
+  const sessionId = configuredSession.sessionName;
   try {
     const sessions = (await wahaClient.getSessions()) as WahaSessionInfo[];
     const session = sessions.find((s) => s.name === sessionId);

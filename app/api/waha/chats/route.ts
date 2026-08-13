@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserTenant } from "@/lib/auth/tenant";
-import { wahaClient } from "@/lib/waha/client";
-
-const SESSION_NAME = "default";
+import { getWhatsappConversations } from "@/lib/data/whatsapp-inbox";
+import { resolveDefaultWahaSessionForTenant } from "@/lib/waha/session";
 
 function clampNumber(value: string | null, fallback: number, min: number, max: number) {
   const parsed = Number(value);
@@ -19,25 +18,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const limit = clampNumber(req.nextUrl.searchParams.get("limit"), 20, 1, 50);
-  const offset = clampNumber(req.nextUrl.searchParams.get("offset"), 0, 0, 10_000);
+  if (!resolveDefaultWahaSessionForTenant(userTenant.tenantId)) {
+    return NextResponse.json(
+      { error: "WhatsApp inbox is unavailable for this tenant." },
+      { status: 403 },
+    );
+  }
+
+  const limit = clampNumber(req.nextUrl.searchParams.get("limit"), 50, 1, 100);
 
   try {
-    const chats = await wahaClient.getChatsOverview(SESSION_NAME, {
-      limit,
-      offset,
-    });
-
-    return NextResponse.json({
-      chats,
-      pagination: { limit, offset },
-    });
+    const conversations = await getWhatsappConversations(userTenant.tenantId, limit);
+    return NextResponse.json({ conversations, tenantId: userTenant.tenantId });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    console.error("WAHA chats overview error:", message);
+    console.error("WhatsApp inbox conversations error:", message);
     return NextResponse.json(
-      { error: "Failed to load WhatsApp chats" },
-      { status: 502 },
+      { error: "Failed to load WhatsApp conversations" },
+      { status: 500 },
     );
   }
 }
