@@ -292,6 +292,65 @@ CREATE TABLE message_logs (
 );
 
 -- ============================================================
+-- WHATSAPP INBOX CONVERSATIONS
+-- ============================================================
+CREATE TABLE whatsapp_conversations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  session_name TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  conversation_key TEXT NOT NULL,
+  normalized_phone TEXT,
+  guest_id UUID REFERENCES guests(id) ON DELETE SET NULL,
+  reservation_id UUID REFERENCES reservations(id) ON DELETE SET NULL,
+  display_name TEXT,
+  is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+  unread_count INTEGER NOT NULL DEFAULT 0 CHECK (unread_count >= 0),
+  last_message_preview TEXT,
+  last_message_direction TEXT CHECK (last_message_direction IN ('inbound', 'outbound')),
+  last_message_at TIMESTAMPTZ,
+  last_seen_message_at TIMESTAMPTZ,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(tenant_id, session_name, chat_id),
+  UNIQUE(tenant_id, session_name, conversation_key)
+);
+
+-- ============================================================
+-- WHATSAPP INBOX MESSAGES
+-- ============================================================
+CREATE TABLE whatsapp_messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  conversation_id UUID NOT NULL REFERENCES whatsapp_conversations(id) ON DELETE CASCADE,
+  session_name TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  provider_message_id TEXT,
+  client_message_id TEXT,
+  idempotency_key TEXT,
+  direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+  content TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('sending', 'sent', 'failed', 'received')),
+  error_message TEXT,
+  provider_response JSONB,
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  sent_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+);
+
+CREATE UNIQUE INDEX idx_whatsapp_messages_provider_message_unique
+  ON whatsapp_messages(tenant_id, session_name, provider_message_id)
+  WHERE provider_message_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_whatsapp_messages_client_message_unique
+  ON whatsapp_messages(tenant_id, session_name, client_message_id)
+  WHERE client_message_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_whatsapp_messages_idempotency_unique
+  ON whatsapp_messages(tenant_id, session_name, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+-- ============================================================
 -- AI SETTINGS
 -- ============================================================
 CREATE TABLE ai_settings (
@@ -494,6 +553,8 @@ ALTER TABLE service_catalog_item_aliases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_template_variants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE whatsapp_conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE whatsapp_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lifecycle_ai_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inbound_events ENABLE ROW LEVEL SECURITY;
@@ -628,6 +689,13 @@ CREATE POLICY "Members can manage template variants" ON message_template_variant
 CREATE POLICY "Members can view message logs" ON message_logs
   FOR SELECT USING (tenant_id = public.get_user_tenant_id());
 
+-- WHATSAPP INBOX: members can view their tenant's persisted chats and messages
+CREATE POLICY "Members can view WhatsApp conversations" ON whatsapp_conversations
+  FOR SELECT USING (tenant_id = public.get_user_tenant_id());
+
+CREATE POLICY "Members can view WhatsApp messages" ON whatsapp_messages
+  FOR SELECT USING (tenant_id = public.get_user_tenant_id());
+
 -- AI SETTINGS: members can view, only owner can manage
 CREATE POLICY "Members can view AI settings" ON ai_settings
   FOR SELECT USING (tenant_id = public.get_user_tenant_id());
@@ -673,6 +741,12 @@ CREATE UNIQUE INDEX idx_service_catalog_item_aliases_lower_unique ON service_cat
 CREATE INDEX idx_message_template_variants_template_id ON message_template_variants(template_id);
 CREATE INDEX idx_message_logs_tenant_id ON message_logs(tenant_id);
 CREATE INDEX idx_message_logs_trigger_type ON message_logs(trigger_type);
+CREATE INDEX idx_whatsapp_conversations_tenant_last_message ON whatsapp_conversations(tenant_id, last_message_at DESC NULLS LAST);
+CREATE INDEX idx_whatsapp_conversations_tenant_guest ON whatsapp_conversations(tenant_id, guest_id) WHERE guest_id IS NOT NULL;
+CREATE INDEX idx_whatsapp_conversations_tenant_reservation ON whatsapp_conversations(tenant_id, reservation_id) WHERE reservation_id IS NOT NULL;
+CREATE INDEX idx_whatsapp_conversations_tenant_phone ON whatsapp_conversations(tenant_id, normalized_phone) WHERE normalized_phone IS NOT NULL;
+CREATE INDEX idx_whatsapp_messages_conversation_time ON whatsapp_messages(conversation_id, sent_at ASC NULLS LAST, created_at ASC);
+CREATE INDEX idx_whatsapp_messages_tenant_time ON whatsapp_messages(tenant_id, created_at DESC);
 CREATE INDEX idx_message_logs_automation_job_id ON message_logs(automation_job_id);
 CREATE INDEX idx_message_logs_status ON message_logs(status);
 CREATE UNIQUE INDEX idx_message_logs_inbound_post_stay_provider_message_unique ON message_logs(tenant_id, provider_message_id) WHERE direction = 'inbound' AND trigger_type = 'post-stay' AND provider_message_id IS NOT NULL;
