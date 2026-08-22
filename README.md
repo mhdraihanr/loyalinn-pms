@@ -1,10 +1,10 @@
 # Hotel PMS Integration & WhatsApp Automation with Agentic AI Web App
 
 ![Dashboard Operations](public/images/readme/dashboard-operation.png)
-*Operations dashboard — realtime queues, WhatsApp inbox, and guest monitoring.*
+_Operations dashboard — realtime queues, WhatsApp inbox, and guest monitoring._
 
 ![Login Page](public/images/readme/login-page.png)
-*Hospiflow login page.*
+_Hospiflow login page._
 
 A hotel operations platform that integrates Property Management Systems (PMS) with WhatsApp automation, lifecycle AI agents, and realtime operational dashboards. The app synchronizes reservations and guest profiles, sends automated WAHA-powered WhatsApp messages, escalates post-stay feedback into AI follow-up, and turns guest requests into staff-visible queues.
 
@@ -179,16 +179,16 @@ a-proposal2/
 
 Create a local environment file and provide the values used by your deployment.
 
-| Group                 | Variables                                                                                                                                                       |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App                   | `NEXT_PUBLIC_APP_URL`                                                                                                                                           |
-| Supabase              | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`                                                                 |
+| Group                 | Variables                                                                                                                                                                                                                                     |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App                   | `NEXT_PUBLIC_APP_URL`                                                                                                                                                                                                                         |
+| Supabase              | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`                                                                                                                                               |
 | WAHA                  | `WAHA_BASE_URL`, `WAHA_API_KEY`, `WAHA_WEBHOOK_SECRET`, `WAHA_WEBHOOK_AUTH_DISABLED`, `WAHA_WEBHOOK_URL`, `WAHA_WEBHOOK_EVENTS`, `WAHA_AUTO_CONFIGURE_WEBHOOKS`, `WAHA_DEFAULT_TENANT_ID`, `WAHA_NOWEB_STORE_ENABLED`, `WAHA_NOWEB_FULL_SYNC` |
-| PMS webhook           | `PMS_WEBHOOK_SECRET`                                                                                                                                            |
-| PMS reconciliation    | `PMS_RECONCILIATION_ENABLED`, `PMS_RECONCILIATION_CRON_SECRET`, `CRON_SECRET`                                                                                   |
-| Automation dev worker | `DEV_AUTOMATION_SYNC_ENABLED`, `DEV_AUTOMATION_SYNC_INTERVAL_MS`                                                                                                |
-| AI                    | `AI_PROVIDER`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GEMINI_MODEL`, `NINEROUTER_URL`, `NINEROUTER_BASE_URL`, `NINEROUTER_KEY`, `NINEROUTER_API_KEY`, `NINEROUTER_MODEL` |
-| Debugging             | `LIFECYCLE_AI_DEBUG`                                                                                                                                            |
+| PMS webhook           | `PMS_WEBHOOK_SECRET`                                                                                                                                                                                                                          |
+| PMS reconciliation    | `PMS_RECONCILIATION_ENABLED`, `PMS_RECONCILIATION_CRON_SECRET`, `CRON_SECRET`                                                                                                                                                                 |
+| Automation dev worker | `DEV_AUTOMATION_SYNC_ENABLED`, `DEV_AUTOMATION_SYNC_INTERVAL_MS`                                                                                                                                                                              |
+| AI                    | `AI_PROVIDER`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GEMINI_MODEL`, `NINEROUTER_URL`, `NINEROUTER_BASE_URL`, `NINEROUTER_KEY`, `NINEROUTER_API_KEY`, `NINEROUTER_MODEL`                                                          |
+| Debugging             | `LIFECYCLE_AI_DEBUG`                                                                                                                                                                                                                          |
 
 Local development defaults to `AI_PROVIDER=gemini` with `GEMINI_MODEL=gemini-2.5-flash` for lifecycle tool-calling consistency. Set either `GEMINI_API_KEY` or the AI SDK-compatible `GOOGLE_GENERATIVE_AI_API_KEY` for Gemini.
 
