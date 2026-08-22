@@ -48,7 +48,10 @@ next-env.d.ts
 
 # local agent artifacts
 .codex
-/docs/
+# docs: keep operational docs tracked, ignore working notes & phase logs
+/docs/plans/
+/docs/phase-[0-9]*/
+/docs/20[0-9][0-9]-*
 /conference-paper/
 /tests/
 /testapi/
@@ -58,3 +61,13 @@ next-env.d.ts
 /.codex/
 /check_templates.mjs
 /debug_onstay.mjs
+
+# Claude AI and worktree artifacts
+.claude/
+.worktrees/
+
+# Session backups
+.waha_sessions_backup/
+
+# Local workspace files
+*.code-workspace
