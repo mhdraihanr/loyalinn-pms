@@ -1,5 +1,11 @@
 # Hotel PMS Integration & WhatsApp Automation with Agentic AI Web App
 
+![Dashboard Operations](public/images/readme/dashboard-operation.png)
+*Operations dashboard — realtime queues, WhatsApp inbox, and guest monitoring.*
+
+![Login Page](public/images/readme/login-page.png)
+*Hospiflow login page.*
+
 A hotel operations platform that integrates Property Management Systems (PMS) with WhatsApp automation, lifecycle AI agents, and realtime operational dashboards. The app synchronizes reservations and guest profiles, sends automated WAHA-powered WhatsApp messages, escalates post-stay feedback into AI follow-up, and turns guest requests into staff-visible queues.
 
 ---
