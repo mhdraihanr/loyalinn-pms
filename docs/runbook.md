@@ -280,7 +280,7 @@ requestId:"abc-123" AND level:"error"
 
 - Review handoff sessions with `needs_human_follow_up = true` and `session_status = 'handoff'`.
 - Do not reset a handoff session to `active` merely to restart automation; resolve the guest issue first.
-- See [Lifecycle Intent Guard](./lifecycle-intent-guard.md) for the scope matrix, SQL triage query, and smoke scenarios.
+- See [Lifecycle Intent Guard](./lifecycle/lifecycle-intent-guard.md) for the scope matrix, SQL triage query, and smoke scenarios.
 
 ### Human Handoffs Chat Drawer
 
@@ -303,7 +303,7 @@ requestId:"abc-123" AND level:"error"
 
 - The database transcript in `message_logs` remains available when WAHA is unavailable.
 - For older handoffs without persisted WAHA chat identity, the server falls back to the guest phone; LID-specific history may require a new inbound webhook to establish the original mapping.
-- See [Human Handoffs Operations](./human-handoffs-operations.md) for the full staff workflow and SQL triage query.
+- See [Human Handoffs Operations](./lifecycle/human-handoffs-operations.md) for the full staff workflow and SQL triage query.
 
 ### Menu & Facilities Catalog Not Used by On-Stay AI
 

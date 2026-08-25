@@ -735,7 +735,7 @@ Implemented files tracked for Phase 4 to date (Tasks 1-8):
   - `components/operations/room-service-table.tsx`
   - `components/operations/arrival-requests-table.tsx`
   - `components/feedback/feedback-monitor-table.tsx`
-  - `docs/dashboard-table-search-consistency.md`
+  - `docs/guides/dashboard-table-search-consistency.md`
 - Post-stay feedback flow and monitoring:
   - `lib/automation/post-stay-feedback-parser.ts`
   - `lib/automation/feedback-link.ts`
@@ -746,7 +746,7 @@ Implemented files tracked for Phase 4 to date (Tasks 1-8):
   - `lib/data/feedback.ts`
   - `app/(dashboard)/feedback/page.tsx`
   - `components/feedback/feedback-monitor-table.tsx`
-  - `docs/post-stay-direct-wa-feedback.md`
+  - `docs/lifecycle/post-stay-direct-wa-feedback.md`
 - AI settings management for follow-up prompt personalization:
   - `app/(dashboard)/settings/ai/page.tsx`
   - `components/settings/ai/ai-settings-form.tsx`
@@ -983,14 +983,14 @@ Features:
 - Room service search covers guest, room, item, note, status, and amount.
 - Arrival request search covers guest, room, request type, status, ETA/requested time, check-in date, and notes.
 - Feedback Monitor search covers guest, phone, status, rating, comment, check-out date, and last update.
-- See [docs/dashboard-table-search-consistency.md](docs/dashboard-table-search-consistency.md)
+- See [docs/guides/dashboard-table-search-consistency.md](docs/guides/dashboard-table-search-consistency.md)
 
 **Retention Policy Update (2026-05-07):**
 
 - Requests with status `resolved` (arrival requests) atau `completed` (housekeeping/room service) akan tetap tampil di dashboard selama 2 hari setelah status berubah.
 - Setelah 2 hari, request tersebut otomatis tidak tampil lagi di dashboard aktif, tapi tetap tersimpan di database untuk audit/history.
 - Tidak ada label baru, status tetap sesuai aslinya.
-- Lihat detail di [docs/operations-dashboard-retention.md](docs/operations-dashboard-retention.md)
+- Lihat detail di [docs/guides/operations-dashboard-retention.md](docs/guides/operations-dashboard-retention.md)
 
 Acceptance Criteria (Phase 4):
 

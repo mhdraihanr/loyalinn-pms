@@ -80,4 +80,4 @@ For high-risk migrations (data transformations, column drops):
 
 ## Migration Inventory
 
-The authoritative list of migrations is the contents of `supabase/migrations/` — do not duplicate it here. Each filename is self-describing (`YYYYMMDDHHMMSS_description.sql`). Notable recent migrations are documented in context where they matter: see `runbook.md` (WhatsApp inbox migrations) and `service-catalog-menu-facilities.md` (service catalog migration).
+The authoritative list of migrations is the contents of `supabase/migrations/` — do not duplicate it here. Each filename is self-describing (`YYYYMMDDHHMMSS_description.sql`). Notable recent migrations are documented in context where they matter: see `runbook.md` (WhatsApp inbox migrations) and `guides/service-catalog-menu-facilities.md` (service catalog migration).
